@@ -35,22 +35,42 @@ const DEMO_PASSWORD = "demo1234";
 let ledger: PassEvent[];
 
 const loadLedger = (): PassEvent[] => {
-  try {
-    const stored = localStorage.getItem(LEDGER_KEY);
-    if (stored) return JSON.parse(stored) as PassEvent[];
-  } catch {
-    // A browser with site data blocked just gets the seed every time.
+  const stored = readStore("local", LEDGER_KEY);
+  if (stored) {
+    try {
+      return JSON.parse(stored) as PassEvent[];
+    } catch {
+      // Corrupt or stale demo data falls back to the seed.
+    }
   }
   return [...seed.passEvents];
 };
 
+/**
+ * Storage access itself can throw, not just return null — a browser with site
+ * data blocked, or an embedded preview frame. Demo sign-in must survive that.
+ */
+const readStore = (store: "session" | "local", key: string): string | null => {
+  try {
+    return (store === "session" ? sessionStorage : localStorage).getItem(key);
+  } catch {
+    return null;
+  }
+};
+
+const writeStore = (store: "session" | "local", key: string, value: string | null): void => {
+  try {
+    const target = store === "session" ? sessionStorage : localStorage;
+    if (value === null) target.removeItem(key);
+    else target.setItem(key, value);
+  } catch {
+    // Non-fatal: the choice just does not survive a reload.
+  }
+};
+
 const saveLedger = (next: PassEvent[]): void => {
   ledger = next;
-  try {
-    localStorage.setItem(LEDGER_KEY, JSON.stringify(next));
-  } catch {
-    // Non-fatal: the upload still applies for this page view.
-  }
+  writeStore("local", LEDGER_KEY, JSON.stringify(next));
 };
 
 ledger = loadLedger();
@@ -84,16 +104,16 @@ export const mockApi: PortalApi = {
     );
     if (!viewer) throw new ApiError("No demo account with that email address.");
     if (!password) throw new ApiError("Enter a password.");
-    sessionStorage.setItem(SESSION_KEY, viewer.userId);
+    writeStore("session", SESSION_KEY, viewer.userId);
     return delay(viewer);
   },
 
   async signOut() {
-    sessionStorage.removeItem(SESSION_KEY);
+    writeStore("session", SESSION_KEY, null);
   },
 
   async currentViewer() {
-    const id = sessionStorage.getItem(SESSION_KEY);
+    const id = readStore("session", SESSION_KEY);
     if (!id) return null;
     return seed.demoViewers.find((v) => v.userId === id) ?? null;
   },
