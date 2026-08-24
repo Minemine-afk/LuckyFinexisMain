@@ -19,7 +19,7 @@ npm run build        # tsc -b && vite build -> dist/
 
 | Role | Route | What it shows |
 |---|---|---|
-| **Client** | `/passes` | Their own statement: total gold and blue boarding passes, a row per qualifying activity showing what each one earned, and any prizes won. |
+| **Client** | `/passes` | Their own statement: total gold and blue boarding passes, a row per qualifying activity showing what each one earned, and any prizes won. Closed by default against a real backend — see below. |
 | **Consultant** | `/clients` | Every client of theirs holding passes — name, mobile, email, gold and blue totals — with the full breakdown behind the magnifier icon, campaign details, and past monthly winners. |
 | **Admin** | `/admin` | CSV upload for pass activity, with a dry run before anything is written. |
 
@@ -28,6 +28,20 @@ profile, not by the form you used.
 
 A consultant with no qualifying clients still gets their page, with an empty table — being at
 zero early in a campaign is a normal state, not an error.
+
+### The client view is gated
+
+`VITE_CLIENT_PORTAL` controls whether the client statement is reachable. Demo data ignores
+it; against Supabase it defaults to **off**, and a client signing in meets a page telling
+them their passes are tracked and to ask their consultant.
+
+The reason is RLS. The statement needs policies letting a client read their own rows in
+`clients`, `pass_events` and `draw_winners`. Without them RLS denies by default, every query
+comes back empty, and the page renders zero passes for someone who has earned fifty — no
+error, nothing to notice. In a campaign where the number *is* the product, a silent wrong
+number is worse than a closed door.
+
+Add those three policies, set `VITE_CLIENT_PORTAL=true`, and the view opens. No code change.
 
 ## How passes work
 
@@ -131,6 +145,9 @@ cp .env.example .env
 # VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, and VITE_USE_MOCK=false
 ```
 
+If either key is missing the app falls back to demo data rather than failing — the yellow
+"Demo data" banner is how you tell.
+
 The app expects these tables — `profiles`, `advisors`, `clients`, `campaigns`, `activities`,
 `pass_events`, `draws`, `draw_winners` — and a private `campaign-assets` storage bucket. Column
 names are the snake_case of the types in `src/lib/types.ts`; `src/data/supabaseApi.ts` has the
@@ -160,12 +177,14 @@ This pass is the front end. Still to come, in rough order:
 2. **Pages Functions** — `POST /api/uploads/preview` and `POST /api/uploads/commit`, which
    verify the caller's JWT, re-check that they are an admin, and reuse `src/lib/ingest.ts` so
    the browser and the server agree on what a valid row is. `supabaseApi` already calls them.
-3. **Admin: campaign artwork and winners** — the mockups have an admin uploading the campaign
+3. **Client read policies** — the three RLS policies that open the client statement, and
+   removing the `VITE_CLIENT_PORTAL` gate once they exist.
+4. **Admin: campaign artwork and winners** — the mockups have an admin uploading the campaign
    details image and publishing each month's winners. Both are read correctly by the client and
    consultant views; neither has an editor yet. Until artwork is uploaded, the details pop-up
    falls back to the campaign's earning rules rendered from the activity table.
-4. **Account provisioning** — invite, first-login password set, and password reset.
-5. **Sub-admin role** — a restricted admin that can import data but not manage campaigns.
+5. **Account provisioning** — invite, first-login password set, and password reset.
+6. **Sub-admin role** — a restricted admin that can import data but not manage campaigns.
 
 Winners are listed to other consultants by first name and last initial. Revisit that with
 whoever owns client privacy before launch.
