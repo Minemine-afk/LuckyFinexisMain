@@ -1,0 +1,890 @@
+/* ---------------------------------------------------------------- shell */
+
+.shell {
+  display: grid;
+  grid-template-columns: var(--rail) minmax(0, 1fr);
+  min-height: 100%;
+}
+
+.rail {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 18px 0;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+}
+
+.rail .avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--brand-soft);
+  color: var(--brand);
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 10px;
+  border: 1px solid var(--brand-line);
+}
+
+.rail-btn {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 12px;
+  background: none;
+  color: var(--ink-3);
+  transition: background 0.15s, color 0.15s;
+}
+
+.rail-btn:hover {
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+
+.rail-btn[aria-current="page"] {
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.rail-btn[disabled] {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.rail-spacer {
+  flex: 1 1 auto;
+}
+
+/* ---------------------------------------------------------------- page */
+
+.page {
+  padding: 34px 40px 72px;
+  max-width: 1180px;
+}
+
+.page-head {
+  margin-bottom: 22px;
+}
+
+.page-head h1 {
+  font-size: 26px;
+  letter-spacing: -0.02em;
+}
+
+.page-head .sub {
+  margin-top: 6px;
+  color: var(--ink-2);
+}
+
+.linkish {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--brand);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-weight: 500;
+}
+
+.linkish:hover {
+  color: var(--brand-hover);
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 20px 0 14px;
+}
+
+.toolbar .label {
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+/* ---------------------------------------------------------------- chips */
+
+.chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chip {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 999px;
+  padding: 6px 18px;
+  font-size: 13px;
+  color: var(--ink-2);
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.chip:hover {
+  border-color: var(--brand-line);
+  color: var(--ink);
+}
+
+.chip[aria-pressed="true"] {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+
+/* ---------------------------------------------------------------- card */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.card-pad {
+  padding: 26px 30px 30px;
+}
+
+/* ---------------------------------------------------------------- tables */
+
+.tablewrap {
+  overflow-x: auto;
+  border-radius: var(--radius);
+}
+
+table.ptable {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13.5px;
+  min-width: 480px;
+}
+
+table.ptable thead th {
+  background: var(--brand);
+  color: #fff;
+  font-weight: 600;
+  text-align: left;
+  padding: 13px 18px;
+  white-space: nowrap;
+}
+
+table.ptable thead th:first-child {
+  border-top-left-radius: var(--radius);
+}
+
+table.ptable thead th:last-child {
+  border-top-right-radius: var(--radius);
+}
+
+table.ptable tbody td {
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--ink-2);
+  vertical-align: middle;
+}
+
+table.ptable tbody tr:nth-child(even) td {
+  background: var(--surface-2);
+}
+
+table.ptable tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+table.ptable tbody tr:last-child td:first-child {
+  border-bottom-left-radius: var(--radius);
+}
+
+table.ptable tbody tr:last-child td:last-child {
+  border-bottom-right-radius: var(--radius);
+}
+
+.ptable .num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.ptable th.num {
+  text-align: right;
+}
+
+.ptable .name {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.ptable .zero {
+  color: var(--ink-3);
+}
+
+.ptable .rowbtn {
+  border: 1px solid transparent;
+  background: none;
+  border-radius: 8px;
+  padding: 6px;
+  display: inline-grid;
+  place-items: center;
+  color: var(--ink-2);
+}
+
+.ptable .rowbtn:hover {
+  background: var(--brand-soft);
+  border-color: var(--brand-line);
+  color: var(--brand);
+}
+
+/* Skeleton rows keep the advisor table from collapsing while data loads. */
+.ptable td.empty {
+  height: 46px;
+  background: var(--surface-2);
+}
+
+/* ---------------------------------------------------------------- statement */
+
+.statement {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.statement-head {
+  text-align: center;
+  padding: 6px 0 20px;
+}
+
+.statement-head h2 {
+  font-size: 22px;
+}
+
+.statement-head .who {
+  margin-top: 4px;
+  color: var(--ink-2);
+}
+
+.block {
+  margin-top: 26px;
+}
+
+.block-title {
+  text-align: center;
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.block-title .total {
+  font-variant-numeric: tabular-nums;
+}
+
+.block-note {
+  margin: 8px 2px 0;
+  font-size: 12px;
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.statement-foot {
+  margin-top: 28px;
+  text-align: center;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--ink-3);
+}
+
+/* ---------------------------------------------------------------- badges */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.badge.gold {
+  background: var(--gold-soft);
+  border-color: var(--gold-line);
+  color: var(--gold);
+}
+
+.badge.blue {
+  background: var(--brand-soft);
+  border-color: var(--brand-line);
+  color: var(--brand);
+}
+
+.badge.pending {
+  background: var(--warn-soft);
+  border-color: #e8d3a4;
+  color: var(--warn);
+}
+
+.badge.void {
+  background: var(--crit-soft);
+  border-color: #f0c4bd;
+  color: var(--crit);
+}
+
+.badge.good {
+  background: var(--good-soft);
+  border-color: #b9dfd1;
+  color: var(--good);
+}
+
+/* ---------------------------------------------------------------- buttons */
+
+.btn {
+  border: 1px solid var(--brand);
+  background: var(--brand);
+  color: #fff;
+  border-radius: 9px;
+  padding: 9px 18px;
+  font-size: 13.5px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn:hover {
+  background: var(--brand-hover);
+  border-color: var(--brand-hover);
+}
+
+.btn[disabled] {
+  opacity: 0.5;
+  cursor: default;
+  background: var(--brand);
+  border-color: var(--brand);
+}
+
+.btn-ghost {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-2);
+  border-radius: 9px;
+  padding: 8px 15px;
+  font-size: 13px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.btn-ghost:hover {
+  border-color: var(--brand-line);
+  color: var(--ink);
+}
+
+.btn-danger {
+  border-color: #e6b3ac;
+  color: var(--crit);
+  background: var(--surface);
+}
+
+.btn-danger:hover {
+  background: var(--crit-soft);
+  border-color: #d99a91;
+  color: var(--crit);
+}
+
+/* ---------------------------------------------------------------- states */
+
+.empty {
+  padding: 44px 20px;
+  text-align: center;
+  color: var(--ink-3);
+  background: var(--surface-2);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+}
+
+.empty strong {
+  display: block;
+  color: var(--ink-2);
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.alert {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 11px 14px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  border: 1px solid;
+  margin-bottom: 16px;
+}
+
+.alert.err {
+  background: var(--crit-soft);
+  border-color: #f0c4bd;
+  color: #7d2820;
+}
+
+.alert.ok {
+  background: var(--good-soft);
+  border-color: #b9dfd1;
+  color: #11563f;
+}
+
+.alert.info {
+  background: var(--brand-soft);
+  border-color: var(--brand-line);
+  color: var(--brand-ink);
+}
+
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--brand-line);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink-3);
+  padding: 40px 0;
+  justify-content: center;
+}
+
+/* ---------------------------------------------------------------- modal */
+
+dialog.modal {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 0;
+  width: min(780px, 94vw);
+  max-height: min(88vh, 900px);
+  box-shadow: var(--shadow-lg);
+}
+
+dialog.modal::backdrop {
+  background: rgba(13, 25, 60, 0.45);
+}
+
+dialog.modal.wide {
+  width: min(1080px, 96vw);
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.modal-head h3 {
+  font-size: 17px;
+}
+
+.modal-body {
+  padding: 22px 26px 30px;
+  overflow: auto;
+  max-height: calc(88vh - 62px);
+}
+
+.modal-body img.details-art {
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  display: block;
+}
+
+/* ---------------------------------------------------------------- login */
+
+.login-wrap {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 40px 20px;
+  background:
+    radial-gradient(1100px 500px at 50% -12%, var(--brand-soft), transparent 70%),
+    var(--ground);
+}
+
+.login-card {
+  width: min(430px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: 32px 32px 28px;
+}
+
+.login-card .mark {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--brand);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  margin-bottom: 16px;
+}
+
+.login-card h1 {
+  font-size: 21px;
+}
+
+.login-card .sub {
+  color: var(--ink-2);
+  margin: 6px 0 22px;
+  font-size: 13.5px;
+}
+
+.field {
+  margin-bottom: 14px;
+}
+
+.field label {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink-2);
+  margin-bottom: 5px;
+}
+
+.field input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+.field input:focus {
+  outline: none;
+  border-color: var(--brand-line);
+  box-shadow: 0 0 0 3px var(--brand-soft);
+}
+
+.login-card .btn {
+  width: 100%;
+  justify-content: center;
+  margin-top: 6px;
+}
+
+.demo-accounts {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.demo-accounts h2 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+  margin-bottom: 10px;
+}
+
+.demo-accounts button {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 9px;
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.demo-accounts button:hover {
+  border-color: var(--brand-line);
+  background: var(--brand-soft);
+}
+
+/* ---------------------------------------------------------------- admin */
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 18px;
+}
+
+.stat-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 14px 0 18px;
+}
+
+.stat {
+  flex: 1 1 130px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  background: var(--surface);
+}
+
+.stat .n {
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.stat .k {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.stat.ok .n {
+  color: var(--good);
+}
+.stat.warn .n {
+  color: var(--warn);
+}
+.stat.bad .n {
+  color: var(--crit);
+}
+
+.dropzone {
+  border: 1.5px dashed var(--brand-line);
+  border-radius: var(--radius);
+  background: var(--brand-soft);
+  padding: 30px 20px;
+  text-align: center;
+  color: var(--ink-2);
+}
+
+.dropzone.over {
+  background: #dfe6f8;
+  border-color: var(--brand);
+}
+
+.dropzone input[type="file"] {
+  display: block;
+  margin: 12px auto 0;
+  max-width: 100%;
+}
+
+.mono {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12.5px;
+}
+
+.rowtag {
+  font-size: 11.5px;
+  font-weight: 600;
+  border-radius: 5px;
+  padding: 1px 7px;
+}
+
+.rowtag.insert {
+  background: var(--good-soft);
+  color: var(--good);
+}
+.rowtag.duplicate {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.rowtag.reject {
+  background: var(--crit-soft);
+  color: var(--crit);
+}
+
+.schema-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.schema-table th,
+.schema-table td {
+  text-align: left;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: top;
+}
+
+.schema-table th {
+  color: var(--ink-3);
+  font-weight: 600;
+  font-size: 12px;
+}
+
+/* ---------------------------------------------------------------- banner */
+
+.demo-banner {
+  background: var(--warn-soft);
+  border-bottom: 1px solid #e8d3a4;
+  color: #6f4a12;
+  font-size: 12.5px;
+  padding: 7px 20px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* ---------------------------------------------------------------- responsive */
+
+@media (max-width: 860px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+    /* Auto rows stretch to fill the grid's min-height, which left a tall gap
+       under the horizontal rail. Pin the rail to its content and let the page
+       take the rest. */
+    grid-template-rows: auto 1fr;
+  }
+
+  .rail {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    height: auto;
+    flex-direction: row;
+    width: 100%;
+    padding: 8px 12px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    overflow-x: auto;
+  }
+
+  .rail .avatar {
+    margin-bottom: 0;
+  }
+
+  .rail-spacer {
+    flex: 1 1 auto;
+  }
+
+  .page {
+    padding: 22px 16px 60px;
+  }
+
+  .card-pad {
+    padding: 20px 16px 24px;
+  }
+}
+
+/* On a narrow screen a wide table hides the columns the reader came for, so
+   each row becomes its own labelled card instead of scrolling sideways. */
+@media (max-width: 700px) {
+  table.ptable:not(.stack) {
+    min-width: 0;
+  }
+
+  table.ptable:not(.stack) td,
+  table.ptable:not(.stack) th {
+    padding: 11px 12px;
+  }
+
+  table.ptable.stack {
+    min-width: 0;
+    display: block;
+  }
+
+  table.ptable.stack thead {
+    display: none;
+  }
+
+  table.ptable.stack tbody,
+  table.ptable.stack tr {
+    display: block;
+  }
+
+  table.ptable.stack tr {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    margin-bottom: 10px;
+    background: var(--surface);
+    overflow: hidden;
+  }
+
+  /* Striping is meaningless once each row is its own card, and it competed
+     with the name band below on alternate rows. */
+  table.ptable.stack tbody tr:nth-child(n) td {
+    background: transparent;
+  }
+
+  table.ptable.stack td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    text-align: right;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  table.ptable.stack td::before {
+    content: attr(data-label);
+    color: var(--ink-3);
+    font-size: 12px;
+    font-weight: 500;
+    text-align: left;
+    flex: 0 0 auto;
+  }
+
+  /* The name leads the card, so it gets no label and sits on its own line. */
+  table.ptable.stack tbody tr:nth-child(n) td[data-label="Name"] {
+    display: block;
+    text-align: left;
+    background: var(--surface-2);
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  table.ptable.stack td[data-label="Name"]::before {
+    content: none;
+  }
+
+  table.ptable.stack td:last-child {
+    border-bottom: 0;
+  }
+
+  /* An empty state inside a stacked table must not be dressed as a row. */
+  table.ptable.stack td[colspan] {
+    display: block;
+    border: 0;
+  }
+
+  table.ptable.stack td[colspan]::before {
+    content: none;
+  }
+}

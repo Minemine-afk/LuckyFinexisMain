@@ -1,0 +1,2 @@
+# Single page app: every unmatched path is served the shell so client-side routing works.
+/*  /index.html  200
