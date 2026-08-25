@@ -13,8 +13,8 @@ import type {
 /**
  * The demo dataset. Everything here is invented — the numbers are chosen to
  * reproduce the campaign mockups exactly (Jake Peralta at 21 gold / 50 blue,
- * winning the August draw with an OSIM uJolly on a blue pass) so the UI can be
- * reviewed before a Supabase project exists.
+ * winning this month's draw with an OSIM uJolly on a blue pass) so the UI can
+ * be reviewed before a Supabase project exists.
  *
  * Set VITE_USE_MOCK=false and the app talks to Supabase instead; nothing outside
  * `src/data/` knows the difference.
@@ -22,20 +22,53 @@ import type {
 
 const CAMPAIGN_ID = "cmp-atw-2026";
 
+/**
+ * Demo dates are relative to the current month rather than fixed.
+ *
+ * Blue passes expire at the end of the month they are earned, so a fixed date
+ * would mean the demo showed every blue pass expired a month after it was
+ * written — the statement would read zero and look broken rather than
+ * demonstrating the rule. Anchoring to today keeps the figures matching the
+ * campaign mockups whenever the demo is opened.
+ */
+const NOW = new Date();
+
+/** `monthsFromNow(-1)` → last month as "YYYY-MM". */
+const monthsFromNow = (delta: number): string => {
+  const d = new Date(Date.UTC(NOW.getUTCFullYear(), NOW.getUTCMonth() + delta, 1));
+  return d.toISOString().slice(0, 7);
+};
+
+/** A date inside the month `delta` months from now, e.g. dayIn(-1, 19). */
+const dayIn = (delta: number, day: number): string =>
+  `${monthsFromNow(delta)}-${String(day).padStart(2, "0")}`;
+
+const THIS_MONTH = monthsFromNow(0);
+const LAST_MONTH = monthsFromNow(-1);
+
+/** Last day of the month `delta` months out, for the campaign close date. */
+const endOfMonth = (delta: number): string => {
+  const d = new Date(Date.UTC(NOW.getUTCFullYear(), NOW.getUTCMonth() + delta + 1, 0));
+  return d.toISOString().slice(0, 10);
+};
+
 export const campaign: Campaign = {
   id: CAMPAIGN_ID,
   name: "Around The World Client Campaign",
   slug: "around-the-world-2026",
-  startsOn: "2026-07-01",
-  endsOn: "2026-12-31",
+  startsOn: `${monthsFromNow(-1)}-01`,
+  endsOn: endOfMonth(4),
   // In a real deployment this is a signed URL to the artwork an admin uploaded
   // to Supabase Storage. The demo ships an inline placeholder instead.
   detailsImageUrl: null,
-  dataAsOf: "2026-08-15",
+  dataAsOf: dayIn(0, Math.min(NOW.getUTCDate(), 28)),
   // The mockup shows Jake keeping all 50 blue passes after winning in August,
   // so a win does not spend passes. Flip this once the campaign terms are
   // confirmed — `consumedByDrawId` on the ledger already supports it.
   consumePassesOnWin: false,
+  // Blue passes are spent in the month they are earned; gold accumulates for
+  // the whole campaign.
+  passExpiry: { gold: "campaign_end", blue: "month_end" },
 };
 
 export const activities: Activity[] = [
@@ -157,52 +190,50 @@ const ev = (
 };
 
 export const passEvents: PassEvent[] = [
-  // Jake Peralta — 21 gold, 50 blue, exactly as the client statement mockup shows.
-  ev("cli-1", "act-gold-purchase", 1, "2026-07-04", "POL-88213"),
-  ev("cli-1", "act-blue-referral", 5, "2026-07-11", "Referral batch Jul"),
-  ev("cli-1", "act-blue-event", 2, "2026-07-19", "Mid-year market outlook"),
-  ev("cli-1", "act-blue-guest", 3, "2026-07-19", "Mid-year market outlook"),
+  // Jake Peralta — 21 gold, 50 blue, exactly as the client statement mockup
+  // shows. His gold was earned last month and carries forward; his blue is all
+  // from this month, because blue would otherwise have expired.
+  ev("cli-1", "act-gold-purchase", 1, dayIn(-1, 4), "POL-88213"),
+  ev("cli-1", "act-blue-referral", 5, dayIn(0, 3), "Referral batch"),
+  ev("cli-1", "act-blue-event", 2, dayIn(0, 11), "Market outlook briefing"),
+  ev("cli-1", "act-blue-guest", 3, dayIn(0, 11), "Market outlook briefing"),
 
-  // Rosa Diaz — two qualifying cases, a handful of blue.
-  ev("cli-2", "act-gold-purchase", 2, "2026-07-08", "POL-88240 / POL-88241"),
-  ev("cli-2", "act-blue-referral", 1, "2026-07-22", "Referral: A. Diaz"),
-  ev("cli-2", "act-blue-event", 2, "2026-08-02", "Retirement planning clinic"),
+  // Rosa Diaz — two qualifying cases carried forward, a handful of live blue.
+  ev("cli-2", "act-gold-purchase", 2, dayIn(-1, 8), "POL-88240 / POL-88241"),
+  ev("cli-2", "act-blue-referral", 1, dayIn(0, 6), "Referral: A. Diaz"),
+  ev("cli-2", "act-blue-event", 2, dayIn(0, 14), "Retirement planning clinic"),
 
-  // Terry Jeffords — blue only, plus a testimonial and the app download.
-  ev("cli-3", "act-blue-referral", 2, "2026-07-15", "Referral: S. Jeffords"),
-  ev("cli-3", "act-blue-event", 1, "2026-07-19", "Mid-year market outlook"),
-  ev("cli-3", "act-blue-guest", 1, "2026-07-19", "Guest: Sharon"),
-  ev("cli-3", "act-blue-testimonial", 1, "2026-08-01", "Testimonial 2026-08"),
-  ev("cli-3", "act-blue-finconnect", 1, "2026-08-03", "finConnect install"),
+  // Terry Jeffords — the worked example of expiry. Last month's blue is spent
+  // and no longer counts; only this month's testimonial and app download do.
+  ev("cli-3", "act-blue-referral", 2, dayIn(-1, 15), "Referral: S. Jeffords"),
+  ev("cli-3", "act-blue-event", 1, dayIn(-1, 19), "Mid-year market outlook"),
+  ev("cli-3", "act-blue-guest", 1, dayIn(-1, 19), "Guest: Sharon"),
+  ev("cli-3", "act-blue-testimonial", 1, dayIn(0, 1), "Testimonial"),
+  ev("cli-3", "act-blue-finconnect", 1, dayIn(0, 3), "finConnect install"),
 
   // Gina Linetti — a gold case still inside its free-look window, so pending,
-  // and a referral purchase that was clawed back when the policy was cancelled.
-  ev("cli-4", "act-gold-purchase", 1, "2026-08-12", "POL-88301", "pending"),
-  ev("cli-4", "act-gold-referral-purchase", 1, "2026-07-30", "POL-88266", "void", "Policy cancelled in free-look"),
-  ev("cli-4", "act-blue-referral", 3, "2026-07-28", "Referral batch Jul"),
-  ev("cli-4", "act-blue-finconnect", 1, "2026-07-29", "finConnect install"),
+  // and a referral purchase clawed back when the policy was cancelled.
+  ev("cli-4", "act-gold-purchase", 1, dayIn(0, 12), "POL-88301", "pending"),
+  ev("cli-4", "act-gold-referral-purchase", 1, dayIn(-1, 30), "POL-88266", "void", "Policy cancelled in free-look"),
+  ev("cli-4", "act-blue-referral", 3, dayIn(0, 8), "Referral batch"),
+  ev("cli-4", "act-blue-finconnect", 1, dayIn(-1, 29), "finConnect install"),
 
   // Charles Boyle — one event, the smallest possible qualifying client.
-  ev("cli-5", "act-blue-event", 1, "2026-08-05", "Retirement planning clinic"),
+  ev("cli-5", "act-blue-event", 1, dayIn(0, 5), "Retirement planning clinic"),
 ];
 
 export const draws: Draw[] = [
-  { id: "draw-2026-07", campaignId: CAMPAIGN_ID, drawMonth: "2026-07", status: "published", drawnAt: "2026-08-01" },
-  { id: "draw-2026-08", campaignId: CAMPAIGN_ID, drawMonth: "2026-08", status: "published", drawnAt: "2026-09-01" },
+  { id: "draw-prev", campaignId: CAMPAIGN_ID, drawMonth: LAST_MONTH, status: "published", drawnAt: `${THIS_MONTH}-01` },
+  { id: "draw-current", campaignId: CAMPAIGN_ID, drawMonth: THIS_MONTH, status: "published", drawnAt: `${THIS_MONTH}-15` },
 ];
 
 export const drawWinners: DrawWinner[] = [
-  { id: "win-1", drawId: "draw-2026-07", drawMonth: "2026-07", clientId: "cli-3", displayName: "Terry J.", prize: "Dyson Airwrap", passType: "blue" },
-  { id: "win-2", drawId: "draw-2026-07", drawMonth: "2026-07", clientId: "cli-2", displayName: "Rosa D.", prize: "Business class upgrade voucher", passType: "gold" },
-  { id: "win-3", drawId: "draw-2026-08", drawMonth: "2026-08", clientId: "cli-1", displayName: "Jake P.", prize: "OSIM uJolly", passType: "blue" },
-  { id: "win-4", drawId: "draw-2026-08", drawMonth: "2026-08", clientId: "cli-4", displayName: "Gina L.", prize: "Apple Watch Series 10", passType: "blue" },
+  { id: "win-1", drawId: "draw-prev", drawMonth: LAST_MONTH, clientId: "cli-3", displayName: "Terry J.", prize: "Dyson Airwrap", passType: "blue" },
+  { id: "win-2", drawId: "draw-prev", drawMonth: LAST_MONTH, clientId: "cli-2", displayName: "Rosa D.", prize: "Business class upgrade voucher", passType: "gold" },
+  { id: "win-3", drawId: "draw-current", drawMonth: THIS_MONTH, clientId: "cli-1", displayName: "Jake P.", prize: "OSIM uJolly", passType: "blue" },
+  { id: "win-4", drawId: "draw-current", drawMonth: THIS_MONTH, clientId: "cli-4", displayName: "Gina L.", prize: "Apple Watch Series 10", passType: "blue" },
 ];
 
-/**
- * Demo sign-ins. Real deployments authenticate against Supabase Auth; these
- * exist so the portal can be clicked through with no backend, and are listed on
- * the login screen for that reason.
- */
 export const demoViewers: Viewer[] = [
   { userId: "usr-client", email: "jake@b99.co", role: "client", fullName: "Jake Peralta", clientId: "cli-1", advisorId: null },
   { userId: "usr-advisor", email: "advisor@finexis.demo", role: "advisor", fullName: "Amy Santiago", clientId: null, advisorId: "adv-1" },

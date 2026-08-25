@@ -21,6 +21,9 @@ export type PassStatus = "valid" | "pending" | "void";
 
 export type DrawStatus = "scheduled" | "drawn" | "published";
 
+/** Re-exported from the pass rules so `Campaign` can be read on its own. */
+export type PassExpiry = "month_end" | "campaign_end";
+
 /** A draw month, always "YYYY-MM". Lexicographic order is chronological order. */
 export type DrawMonth = string;
 
@@ -36,6 +39,12 @@ export interface Campaign {
   dataAsOf: string | null;
   /** Whether winning a draw spends the passes that were entered into it. */
   consumePassesOnWin: boolean;
+  /**
+   * How long each pass type keeps counting. Blue passes are typically spent in
+   * the month they are earned; gold passes carry through the campaign. Held per
+   * campaign because it is a campaign term, not a property of the software.
+   */
+  passExpiry: Record<PassType, PassExpiry>;
 }
 
 export interface Activity {

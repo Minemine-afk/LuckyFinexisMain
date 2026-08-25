@@ -7,7 +7,7 @@ import {
   type IngestContext,
   type UploadPreview,
 } from "../lib/ingest";
-import { totalPasses } from "../lib/passes";
+import { currentDrawMonth, passesForDraw } from "../lib/passes";
 import type {
   Activity,
   AdvisorClientRow,
@@ -128,6 +128,7 @@ export const mockApi: PortalApi = {
 
   async getAdvisorClients(advisorId, campaignId): Promise<AdvisorClientRow[]> {
     const mine = seed.clients.filter((c) => c.advisorId === advisorId);
+    const drawMonth = currentDrawMonth(seed.campaign);
     const rows = mine
       .map((client) => {
         const events = ledger.filter(
@@ -135,8 +136,8 @@ export const mockApi: PortalApi = {
         );
         return {
           client,
-          gold: totalPasses(events, "gold", seed.activities),
-          blue: totalPasses(events, "blue", seed.activities),
+          gold: passesForDraw(events, "gold", seed.activities, seed.campaign, drawMonth),
+          blue: passesForDraw(events, "blue", seed.activities, seed.campaign, drawMonth),
           hasAny: events.length > 0,
         };
       })

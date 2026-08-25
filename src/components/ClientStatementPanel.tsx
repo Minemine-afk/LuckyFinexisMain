@@ -1,5 +1,5 @@
 import { activityRule, monthName, passTypeLabel, shortDate } from "../lib/format";
-import { buildPassBlocks } from "../lib/passes";
+import { buildPassBlocks, currentDrawMonth } from "../lib/passes";
 import type { Activity, Campaign, ClientStatement } from "../lib/types";
 
 /**
@@ -21,7 +21,8 @@ export function ClientStatementPanel({
   statement: ClientStatement;
   showHeading?: boolean;
 }) {
-  const blocks = buildPassBlocks(activities, statement.events);
+  const drawMonth = currentDrawMonth(campaign);
+  const blocks = buildPassBlocks(activities, statement.events, campaign, drawMonth);
   const { winners } = statement;
 
   return (
@@ -64,17 +65,32 @@ export function ClientStatementPanel({
           </div>
 
           {/* Only shown when there is something to explain, so a clean account
-              reads exactly like the mockup. */}
-          {(block.pending > 0 || block.voided > 0) && (
+              reads exactly like the mockup. Expired passes are named rather than
+              quietly dropped — a client who remembers earning them deserves to
+              see where they went. */}
+          {(block.pending > 0 || block.voided > 0 || block.expired > 0 ||
+            block.upcoming > 0) && (
             <p className="block-note">
+              {block.expired > 0 && (
+                <>
+                  {block.expired} {passTypeLabel(block.passType).toLowerCase()}{" "}
+                  {block.expired === 1 ? "pass entered an earlier draw" : "passes entered earlier draws"}{" "}
+                  and {block.expired === 1 ? "has" : "have"} now expired.{" "}
+                </>
+              )}
               {block.pending > 0 && (
                 <>
                   {block.pending} {passTypeLabel(block.passType).toLowerCase()}{" "}
                   {block.pending === 1 ? "pass is" : "passes are"} pending confirmation and
-                  not yet in the draw.
+                  not yet in the draw.{" "}
                 </>
               )}
-              {block.pending > 0 && block.voided > 0 && " "}
+              {block.upcoming > 0 && (
+                <>
+                  {block.upcoming} {block.upcoming === 1 ? "pass enters" : "passes enter"} a
+                  later draw.{" "}
+                </>
+              )}
               {block.voided > 0 && (
                 <>
                   {block.voided} {block.voided === 1 ? "pass was" : "passes were"} withdrawn.

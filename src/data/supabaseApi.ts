@@ -1,6 +1,6 @@
 import { supabase } from "../lib/supabase";
 import type { UploadPreview } from "../lib/ingest";
-import { totalPasses } from "../lib/passes";
+import { currentDrawMonth, passesForDraw } from "../lib/passes";
 import type {
   Activity,
   AdvisorClientRow,
@@ -40,6 +40,8 @@ interface CampaignRow {
   details_image_path: string | null;
   data_as_of: string | null;
   consume_passes_on_win: boolean;
+  gold_pass_expiry: "month_end" | "campaign_end" | null;
+  blue_pass_expiry: "month_end" | "campaign_end" | null;
 }
 
 interface ActivityRow {
@@ -263,6 +265,13 @@ export const supabaseApi: PortalApi = {
       detailsImageUrl: await signDetailsImage(row.details_image_path),
       dataAsOf: row.data_as_of,
       consumePassesOnWin: row.consume_passes_on_win,
+      // Defaults match the campaign terms: blue passes are spent in the month
+      // they are earned, gold accumulates. A campaign row that has not been
+      // migrated yet still behaves correctly rather than expiring nothing.
+      passExpiry: {
+        gold: row.gold_pass_expiry ?? "campaign_end",
+        blue: row.blue_pass_expiry ?? "month_end",
+      },
     };
   },
 
@@ -279,6 +288,8 @@ export const supabaseApi: PortalApi = {
 
   async getAdvisorClients(advisorId, campaignId) {
     const db = supabase();
+    const campaign = await this.getCampaign();
+    const drawMonth = currentDrawMonth(campaign);
 
     const [{ data: clientRows, error: clientErr }, activities] = await Promise.all([
       db.from("clients").select("*").eq("advisor_id", advisorId).order("full_name"),
@@ -302,8 +313,8 @@ export const supabaseApi: PortalApi = {
         const mine = events.filter((e) => e.clientId === client.id);
         return {
           client,
-          gold: totalPasses(mine, "gold", activities),
-          blue: totalPasses(mine, "blue", activities),
+          gold: passesForDraw(mine, "gold", activities, campaign, drawMonth),
+          blue: passesForDraw(mine, "blue", activities, campaign, drawMonth),
           hasAny: mine.length > 0,
         };
       })

@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Lucky draw pass management system \u2014 client and advisor portal",
+  "description": "Lucky draw pass management system — client and advisor portal",
   "engines": {
     "node": ">=20"
   },
