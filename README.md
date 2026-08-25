@@ -138,6 +138,41 @@ testable and what will let the Worker reuse them.
 The client statement is one component, used both by the client's own page and by the
 consultant's details pop-up — there is exactly one description of how a client's passes add up.
 
+## How the app maps onto the database
+
+The schema this connects to uses its own names, and `src/data/supabaseApi.ts` is the whole
+of the translation — nothing outside `src/data/` knows the database exists.
+
+| App concept | Table | Notes |
+|---|---|---|
+| Pass event | `pass_ledger` | `passes_awarded`, falling back to `units × rate_applied` |
+| Activity | `challenge_types` | Keyed by `code`; a global rate card, not per-campaign |
+| Draw | `draws` | One row per month **per pass type**; the portal collapses them to one chip per month |
+| Winner | `prizes_won` | No display name column, so names are shortened from `clients` |
+| Consultant | `advisors` | Linked to auth by `auth_user_id` |
+
+Some judgement calls worth knowing about:
+
+- **The draw month comes from `draw_date`, not `monthly_draw`.** `monthly_draw` is free
+  text and may hold "August", "Aug 2026" or "2026-08" depending on who typed it, so it is
+  treated as a label rather than parsed.
+- **`pass_ledger.draw_id` is read as the draw a pass is entered into**, setting the first
+  month it counts for. Without one, the month comes from `occurred_on`.
+- **`pass_ledger.status` is folded from free text** — anything containing "void", "cancel",
+  "reversed" and similar is void; "pending", "provisional", "free-look" and similar are
+  pending; everything else counts. Narrow `VOID_WORDS` / `PENDING_WORDS` if the column
+  carries states those miss.
+- **Nothing is treated as spent.** There is no consumed column, matching the campaign term
+  that winning does not spend passes.
+- **Roles.** There is no profiles table: the `advisors` row is the source of truth, and an
+  admin is marked by `app_metadata.role`, which only the service role can set. A sign-in
+  matching neither is refused rather than defaulted.
+- **Clients cannot sign in.** `clients` has no auth column, which is why
+  `VITE_CLIENT_PORTAL` stays off against this database.
+- **Winner names follow RLS.** They are read from `clients`, so an advisor sees their own
+  clients named and everyone else's as "A client" — the firm-wide list is only as legible
+  as the policies allow.
+
 ## Running against Supabase
 
 ```bash

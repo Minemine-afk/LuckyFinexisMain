@@ -101,6 +101,15 @@ export function AdminPage() {
       {error && <Alert kind="err">{error}</Alert>}
       {done && <Alert kind="ok">{done}</Alert>}
 
+      {!USE_MOCK && (
+        <Alert kind="info">
+          <strong>Upload is not connected to this database yet.</strong> The ledger is
+          loaded outside the portal for now, and the campaign's rate card uses a column per
+          challenge type rather than a row per event — so this importer's format does not
+          match it. The screen below still shows the validation rules it would apply.
+        </Alert>
+      )}
+
       <div className="card">
         <div className="card-pad">
           <h2 style={{ fontSize: 17, marginBottom: 4 }}>Upload pass activity</h2>
