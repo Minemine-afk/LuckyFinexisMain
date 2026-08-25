@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import type { ReactNode } from "react";
 import { homePathFor, useAuth } from "../auth/AuthProvider";
 import { USE_MOCK } from "../data";
+import { MOCK_REASON } from "../lib/supabase";
 import {
   BellIcon,
   CalendarIcon,
@@ -50,6 +51,12 @@ export function AppShell({ children }: { children: ReactNode }) {
           <span>
             <strong>Demo data.</strong> No backend is connected — every figure below is
             invented and every sign-in is local to this browser tab.
+            {MOCK_REASON && (
+              <>
+                {" "}
+                Cause: <code>{MOCK_REASON}</code>.
+              </>
+            )}
           </span>
         </div>
       )}

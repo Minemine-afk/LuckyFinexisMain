@@ -7,6 +7,22 @@ const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 export const USE_MOCK =
   import.meta.env.VITE_USE_MOCK === "true" || !url || !anonKey;
 
+/**
+ * Why the app fell back to demo data, or null when it did not.
+ *
+ * The three conditions above are all build-time, and a missing variable looks
+ * exactly like a deliberate demo deployment — which makes a misconfigured build
+ * indistinguishable from a working one. Naming the variable turns a guessing
+ * game into a fix. Only names are reported, never values.
+ */
+export const MOCK_REASON: string | null = !USE_MOCK
+  ? null
+  : import.meta.env.VITE_USE_MOCK === "true"
+    ? 'VITE_USE_MOCK is set to "true"'
+    : !url
+      ? "VITE_SUPABASE_URL was not set when this was built"
+      : "VITE_SUPABASE_ANON_KEY was not set when this was built";
+
 let client: SupabaseClient | null = null;
 
 /**

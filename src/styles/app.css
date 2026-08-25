@@ -888,3 +888,13 @@ dialog.modal.wide {
     content: none;
   }
 }
+
+/* The banner names the variable that put the app in demo mode, so a
+   misconfigured deployment says so rather than looking deliberate. */
+.demo-banner code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
