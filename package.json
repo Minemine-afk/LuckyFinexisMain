@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Lucky draw pass management system — client and advisor portal",
+  "description": "Lucky draw pass management system \u2014 client and advisor portal",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -11,8 +11,7 @@
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "pages:dev": "wrangler pages dev dist --compatibility-date=2026-08-01",
-    "pages:deploy": "npm run build && wrangler pages deploy dist"
+    "deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

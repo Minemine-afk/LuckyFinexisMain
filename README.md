@@ -153,20 +153,41 @@ The app expects these tables — `profiles`, `advisors`, `clients`, `campaigns`,
 names are the snake_case of the types in `src/lib/types.ts`; `src/data/supabaseApi.ts` has the
 exact shape of every row it reads.
 
-## Deploying to Cloudflare Pages
+## Deploying to Cloudflare
+
+This deploys as a **Worker with static assets**, not a Pages project — Cloudflare's create
+flow now defaults to Workers, and that is what the config here targets.
+
+From your machine:
 
 ```bash
-npm run pages:deploy       # or connect the repo in the Cloudflare dashboard
+npx wrangler login
+npm run deploy          # builds, then wrangler deploy
 ```
 
-Build command `npm run build`, output directory `dist`. `public/_redirects` serves the shell for
-every path so client-side routing works, and `public/_headers` sets the security headers and
-caches hashed assets. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` as build-time
-environment variables, and the service role key as a Worker secret:
+From the dashboard, connect the repo under Workers & Pages and set:
+
+| Setting | Value |
+|---|---|
+| Build command | `npm run build` |
+| Deploy command | `npx wrangler deploy` |
+| Root directory | `/` |
+| Production branch | `main` |
+
+Environment variables are build-time, so a change to one needs a fresh build to take
+effect. For a demo deployment with no backend, `VITE_USE_MOCK=true` is the only one
+required. For a real deployment set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, and
+put the service role key somewhere it will never reach the browser:
 
 ```bash
-wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 ```
+
+`wrangler.jsonc` serves `dist/` and sets `not_found_handling` to
+`single-page-application`, which is what makes a deep link like `/clients` return the app
+rather than a 404. That is the Workers equivalent of the `_redirects` rule Pages used;
+`public/_redirects` is kept for anyone deploying this to Pages instead.
+`public/_headers` sets the security headers and asset caching.
 
 ## Not built yet
 

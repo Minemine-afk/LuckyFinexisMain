@@ -2,5 +2,10 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "luckyfinexis",
   "compatibility_date": "2026-08-01",
-  "pages_build_output_dir": "dist"
+  "assets": {
+    "directory": "./dist",
+    // Deep links like /clients are client-side routes, not files. Without this a
+    // refresh on any page but the root 404s.
+    "not_found_handling": "single-page-application"
+  }
 }
