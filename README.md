@@ -153,41 +153,43 @@ The app expects these tables — `profiles`, `advisors`, `clients`, `campaigns`,
 names are the snake_case of the types in `src/lib/types.ts`; `src/data/supabaseApi.ts` has the
 exact shape of every row it reads.
 
-## Deploying to Cloudflare
+## Deploying to Cloudflare Pages
 
-This deploys as a **Worker with static assets**, not a Pages project — Cloudflare's create
-flow now defaults to Workers, and that is what the config here targets.
-
-From your machine:
-
-```bash
-npx wrangler login
-npm run deploy          # builds, then wrangler deploy
-```
-
-From the dashboard, connect the repo under Workers & Pages and set:
+Connect the repo in the Cloudflare dashboard under Workers & Pages → Create → **Pages**
+→ Connect to Git, and set:
 
 | Setting | Value |
 |---|---|
-| Build command | `npm run build` |
-| Deploy command | `npx wrangler deploy` |
-| Root directory | `/` |
 | Production branch | `main` |
+| Framework preset | Vite |
+| Build command | `npm run build` |
+| Build output directory | `dist` |
+| Root directory | (leave empty) |
 
-Environment variables are build-time, so a change to one needs a fresh build to take
-effect. For a demo deployment with no backend, `VITE_USE_MOCK=true` is the only one
-required. For a real deployment set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, and
-put the service role key somewhere it will never reach the browser:
+Or from your machine:
 
 ```bash
-npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+npx wrangler login
+npm run pages:deploy
 ```
 
-`wrangler.jsonc` serves `dist/` and sets `not_found_handling` to
-`single-page-application`, which is what makes a deep link like `/clients` return the app
-rather than a 404. That is the Workers equivalent of the `_redirects` rule Pages used;
-`public/_redirects` is kept for anyone deploying this to Pages instead.
-`public/_headers` sets the security headers and asset caching.
+Environment variables are build-time, so changing one needs a fresh build to take effect.
+For a demo deployment with no backend, `VITE_USE_MOCK=true` is the only one required. For a
+real deployment set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, and keep the service
+role key out of the browser entirely:
+
+```bash
+npx wrangler pages secret put SUPABASE_SERVICE_ROLE_KEY
+```
+
+`public/_redirects` serves the shell for every path, so a deep link like `/clients` returns
+the app rather than a 404. `public/_headers` sets the security headers and caches hashed
+assets. `.nvmrc` pins the build to Node 22.
+
+This targets Pages, not Workers. The two use different deploy paths: a Pages project needs
+`pages_build_output_dir` in `wrangler.jsonc` (as here), while a Worker needs an `assets`
+block instead — `wrangler deploy` refuses to run against a config carrying the Pages key,
+and vice versa.
 
 ## Not built yet
 

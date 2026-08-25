@@ -14,7 +14,8 @@
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "deploy": "npm run build && wrangler deploy"
+    "pages:dev": "wrangler pages dev dist --compatibility-date=2026-08-01",
+    "pages:deploy": "npm run build && wrangler pages deploy dist"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
