@@ -235,8 +235,7 @@ export const drawWinners: DrawWinner[] = [
 ];
 
 export const demoViewers: Viewer[] = [
-  { userId: "usr-client", email: "jake@b99.co", role: "client", fullName: "Jake Peralta", clientId: "cli-1", advisorId: null },
-  { userId: "usr-advisor", email: "advisor@finexis.demo", role: "advisor", fullName: "Amy Santiago", clientId: null, advisorId: "adv-1" },
-  { userId: "usr-advisor-2", email: "advisor2@finexis.demo", role: "advisor", fullName: "Norm Scully", clientId: null, advisorId: "adv-2" },
-  { userId: "usr-admin", email: "admin@finexis.demo", role: "admin", fullName: "Holt R.", clientId: null, advisorId: null },
+  { userId: "usr-advisor", email: "advisor@finexis.demo", role: "advisor", fullName: "Amy Santiago", advisorId: "adv-1" },
+  { userId: "usr-advisor-2", email: "advisor2@finexis.demo", role: "advisor", fullName: "Norm Scully", advisorId: "adv-2" },
+  { userId: "usr-admin", email: "admin@finexis.demo", role: "admin", fullName: "Holt R.", advisorId: null },
 ];

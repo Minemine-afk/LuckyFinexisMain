@@ -6,7 +6,12 @@
  * and nothing else in the app has to know where the rows came from.
  */
 
-export type Role = "client" | "advisor" | "admin";
+/**
+ * Who can sign in. Clients are records in this system, not users — the database
+ * has no auth link on `clients`, and the portal is for consultants and the
+ * administrators who load their data.
+ */
+export type Role = "advisor" | "admin";
 
 export type PassType = "gold" | "blue";
 
@@ -126,8 +131,6 @@ export interface Viewer {
   email: string;
   role: Role;
   fullName: string;
-  /** Set when role === "client". */
-  clientId: string | null;
   /** Set when role === "advisor". */
   advisorId: string | null;
 }

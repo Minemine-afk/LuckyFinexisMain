@@ -195,8 +195,7 @@ const toDraw = (r: DrawRow): Draw => ({
  * a user cannot promote themselves by editing their own metadata. A sign-in
  * matching neither is refused rather than defaulted to anything.
  *
- * `clients` carries no auth column, so clients cannot sign in at all. That is
- * why VITE_CLIENT_PORTAL stays off against this database.
+ * `clients` carries no auth column: clients are records here, not users.
  */
 async function resolveViewer(
   userId: string,
@@ -215,11 +214,11 @@ async function resolveViewer(
     .maybeSingle<{ id: string; fc_name: string }>();
 
   if (role === "admin") {
-    return { userId, email, role: "admin", fullName: advisor?.fc_name ?? email, clientId: null, advisorId: advisor?.id ?? null };
+    return { userId, email, role: "admin", fullName: advisor?.fc_name ?? email, advisorId: advisor?.id ?? null };
   }
 
   if (advisor) {
-    return { userId, email, role: "advisor", fullName: advisor.fc_name, clientId: null, advisorId: advisor.id };
+    return { userId, email, role: "advisor", fullName: advisor.fc_name, advisorId: advisor.id };
   }
 
   throw new ApiError(

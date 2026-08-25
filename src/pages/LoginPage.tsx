@@ -7,15 +7,13 @@ import { DEMO_ACCOUNTS } from "../data/mockApi";
 import { USE_MOCK } from "../data";
 
 const ROLE_LABEL: Record<string, string> = {
-  client: "Client",
   advisor: "Consultant",
   admin: "Admin",
 };
 
 /**
- * One sign-in form for all three roles. Which portal you land on is decided by
- * the role on your profile, not by which form you used, so there is no way to
- * reach the advisor view by picking the advisor tab.
+ * One sign-in form for both roles. Which portal you land on is decided by the
+ * role on your record, not by which form you used.
  */
 export function LoginPage() {
   const { viewer, loading, signIn } = useAuth();
@@ -52,8 +50,7 @@ export function LoginPage() {
         </span>
         <h1>Sign in</h1>
         <p className="sub">
-          Clients and financial consultants both sign in here. You will be taken to your
-          own view of the campaign.
+          Financial consultants and campaign administrators sign in here.
         </p>
 
         {error && <Alert kind="err">{error}</Alert>}

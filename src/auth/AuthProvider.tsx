@@ -71,4 +71,4 @@ export function useAuth(): AuthState {
 
 /** Where each role lands after signing in. */
 export const homePathFor = (viewer: Viewer): string =>
-  viewer.role === "client" ? "/passes" : viewer.role === "advisor" ? "/clients" : "/admin";
+  viewer.role === "advisor" ? "/clients" : "/admin";

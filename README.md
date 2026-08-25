@@ -1,8 +1,7 @@
 # LuckyFinexis
 
-Lucky draw pass management for a financial advisory firm's client campaign: clients see the
-boarding passes they have earned and how, and their consultant sees the same for every client
-on their book.
+Lucky draw pass management for a financial advisory firm's client campaign: a consultant sees every client on
+their book, how many valid boarding passes each holds, and exactly how each one was earned.
 
 This repository currently holds the **front end** — a Vite + React + TypeScript app built for
 Cloudflare Pages, talking to Supabase. It runs today against a built-in demo dataset, so the
@@ -11,37 +10,27 @@ whole portal can be clicked through before a Supabase project exists.
 ```bash
 npm install
 npm run dev          # http://localhost:5173, demo data, no backend needed
-npm test             # 36 tests over the pass arithmetic, CSV parser and ingest rules
+npm test             # 43 tests over the pass arithmetic, CSV parser and ingest rules
 npm run build        # tsc -b && vite build -> dist/
 ```
 
-## The three views
+## The two views
 
 | Role | Route | What it shows |
 |---|---|---|
-| **Client** | `/passes` | Their own statement: total gold and blue boarding passes, a row per qualifying activity showing what each one earned, and any prizes won. Closed by default against a real backend — see below. |
 | **Consultant** | `/clients` | Every client of theirs holding passes — name, mobile, email, gold and blue totals — with the full breakdown behind the magnifier icon, campaign details, and past monthly winners. |
 | **Admin** | `/admin` | CSV upload for pass activity, with a dry run before anything is written. |
 
-One sign-in form serves all three. Which portal you land on is decided by the role on your
-profile, not by the form you used.
+One sign-in form serves both. Which portal you land on is decided by the role on your
+record, not by the form you used.
+
+**Clients are records, not users.** They do not sign in and have no page of their own: the
+database carries no auth link on `clients`, and a client's standing reaches them through
+their consultant. The full statement — totals, the activity breakdown, prizes won — is
+rendered behind the magnifier icon on the consultant's table.
 
 A consultant with no qualifying clients still gets their page, with an empty table — being at
 zero early in a campaign is a normal state, not an error.
-
-### The client view is gated
-
-`VITE_CLIENT_PORTAL` controls whether the client statement is reachable. Demo data ignores
-it; against Supabase it defaults to **off**, and a client signing in meets a page telling
-them their passes are tracked and to ask their consultant.
-
-The reason is RLS. The statement needs policies letting a client read their own rows in
-`clients`, `pass_events` and `draw_winners`. Without them RLS denies by default, every query
-comes back empty, and the page renders zero passes for someone who has earned fifty — no
-error, nothing to notice. In a campaign where the number *is* the product, a silent wrong
-number is worse than a closed door.
-
-Add those three policies, set `VITE_CLIENT_PORTAL=true`, and the view opens. No code change.
 
 ## How passes work
 
@@ -167,8 +156,7 @@ Some judgement calls worth knowing about:
 - **Roles.** There is no profiles table: the `advisors` row is the source of truth, and an
   admin is marked by `app_metadata.role`, which only the service role can set. A sign-in
   matching neither is refused rather than defaulted.
-- **Clients cannot sign in.** `clients` has no auth column, which is why
-  `VITE_CLIENT_PORTAL` stays off against this database.
+- **Clients cannot sign in.** `clients` has no auth column; they are records, not users.
 - **Winner names follow RLS.** They are read from `clients`, so an advisor sees their own
   clients named and everyone else's as "A client" — the firm-wide list is only as legible
   as the policies allow.
@@ -235,14 +223,12 @@ This pass is the front end. Still to come, in rough order:
 2. **Pages Functions** — `POST /api/uploads/preview` and `POST /api/uploads/commit`, which
    verify the caller's JWT, re-check that they are an admin, and reuse `src/lib/ingest.ts` so
    the browser and the server agree on what a valid row is. `supabaseApi` already calls them.
-3. **Client read policies** — the three RLS policies that open the client statement, and
-   removing the `VITE_CLIENT_PORTAL` gate once they exist.
-4. **Admin: campaign artwork and winners** — the mockups have an admin uploading the campaign
-   details image and publishing each month's winners. Both are read correctly by the client and
-   consultant views; neither has an editor yet. Until artwork is uploaded, the details pop-up
+3. **Admin: campaign artwork and winners** — the mockups have an admin uploading the campaign
+   details image and publishing each month's winners. Both are read correctly by the
+   consultant view; neither has an editor yet. Until artwork is uploaded, the details pop-up
    falls back to the campaign's earning rules rendered from the activity table.
-5. **Account provisioning** — invite, first-login password set, and password reset.
-6. **Sub-admin role** — a restricted admin that can import data but not manage campaigns.
+4. **Account provisioning** — invite, first-login password set, and password reset.
+5. **Sub-admin role** — a restricted admin that can import data but not manage campaigns.
 
 Winners are listed to other consultants by first name and last initial. Revisit that with
 whoever owns client privacy before launch.
