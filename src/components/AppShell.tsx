@@ -35,6 +35,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   if (!viewer) return <>{children}</>;
 
   const home = homePathFor(viewer);
+
+  const endSession = () => {
+    void signOut().then(() => navigate("/login", { replace: true }));
+  };
+
   const placeholders = [
     { key: "alerts", label: "Notifications", icon: <BellIcon /> },
     { key: "events", label: "Events", icon: <CalendarIcon /> },
@@ -109,16 +114,32 @@ export function AppShell({ children }: { children: ReactNode }) {
             type="button"
             className="rail-btn"
             title={`Sign out (${viewer.email})`}
-            onClick={() => {
-              void signOut().then(() => navigate("/login", { replace: true }));
-            }}
+            onClick={endSession}
           >
             <SignOutIcon />
             <span className="sr-only">Sign out</span>
           </button>
         </nav>
 
-        <main>{children}</main>
+        <main>
+          {/* The rail's sign-out icon is unlabelled, which makes ending a
+              session something you have to already know how to do. Supabase
+              keeps you signed in across visits, so there has to be an obvious
+              way out — and seeing which account you are in answers the question
+              that usually prompts looking for it. */}
+          <div className="accountbar">
+            <span className="who">
+              Signed in as <b>{viewer.fullName}</b>
+              <span className="sep"> · </span>
+              <span className="mail">{viewer.email}</span>
+            </span>
+            <button type="button" className="btn-ghost" onClick={endSession}>
+              <SignOutIcon size={15} />
+              Sign out
+            </button>
+          </div>
+          {children}
+        </main>
       </div>
     </>
   );

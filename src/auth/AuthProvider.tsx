@@ -51,8 +51,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    await api.signOut();
-    setViewer(null);
+    // The local session is cleared whatever the server says. A sign-out that
+    // failed on a network error would otherwise leave someone signed in on a
+    // machine they are trying to walk away from.
+    try {
+      await api.signOut();
+    } finally {
+      setViewer(null);
+    }
   }, []);
 
   const value = useMemo(

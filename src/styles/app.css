@@ -898,3 +898,46 @@ dialog.modal.wide {
   border-radius: 4px;
   padding: 1px 5px;
 }
+
+/* ---------------------------------------------------------------- account bar */
+
+/* Who you are signed in as, and the way out. The rail's icon alone made ending
+   a session something you had to already know how to do. */
+.accountbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 10px 40px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.accountbar .who {
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+.accountbar .who b {
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+.accountbar .mail {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 860px) {
+  .accountbar {
+    padding: 9px 16px;
+    justify-content: space-between;
+  }
+
+  /* The email is the first thing to go when space is short; the name still
+     identifies the account. */
+  .accountbar .sep,
+  .accountbar .mail {
+    display: none;
+  }
+}
