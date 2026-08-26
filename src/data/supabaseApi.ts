@@ -207,11 +207,17 @@ async function resolveViewer(
   const role: Role | null =
     declared === "admin" || declared === "advisor" ? declared : null;
 
-  const { data: advisor } = await db
+  const { data: advisor, error } = await db
     .from("advisors")
     .select("id, fc_name")
     .eq("auth_user_id", userId)
     .maybeSingle<{ id: string; fc_name: string }>();
+
+  // A failed query and an absent row are different problems, and reporting them
+  // identically turns a one-line fix into a guessing game.
+  if (error) {
+    throw new ApiError(`Could not read the advisors table: ${error.message}`);
+  }
 
   if (role === "admin") {
     return { userId, email, role: "admin", fullName: advisor?.fc_name ?? email, advisorId: advisor?.id ?? null };
@@ -221,8 +227,14 @@ async function resolveViewer(
     return { userId, email, role: "advisor", fullName: advisor.fc_name, advisorId: advisor.id };
   }
 
+  // Row level security returns an empty result rather than an error when it
+  // denies a read, so "no advisor" covers both "the column is not set" and "the
+  // policy did not admit me". Naming the id being looked for lets either be
+  // checked against the table in one query.
   throw new ApiError(
-    "This sign-in is not linked to a consultant record. Ask an administrator to add you to the advisors table.",
+    `No consultant record is linked to this sign-in. No row in "advisors" is readable ` +
+      `with auth_user_id = ${userId}. Either that column is not set, or the row level ` +
+      `security policy did not admit this user.`,
   );
 }
 
