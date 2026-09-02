@@ -6,7 +6,8 @@ import { SearchIcon } from "../components/Icons";
 import { Alert, EmptyState, Loading } from "../components/Loading";
 import { Modal } from "../components/Modal";
 import { api } from "../data";
-import { formatMobile, monthName, passTypeLabel } from "../lib/format";
+import { formatMobile, monthAndYear, monthName, passTypeLabel, shortDate } from "../lib/format";
+import { currentDrawMonth } from "../lib/passes";
 import { useAsync } from "../lib/useAsync";
 import type { ClientStatement } from "../lib/types";
 
@@ -51,6 +52,7 @@ export function AdvisorPage() {
   if (!page.data) return null;
 
   const { campaign, activities, clients, draws } = page.data;
+  const drawMonth = currentDrawMonth(campaign);
 
   return (
     <div className="page">
@@ -83,6 +85,21 @@ export function AdvisorPage() {
         </div>
       )}
 
+      {/* The cut-off, up front. The statement footer says "Updated as of" too,
+          but a consultant reading the table needs it before opening anything:
+          an activity after this date is in the *next* draw, not this one. */}
+      <div className="cutoff" role="note">
+        <span className="draw">Entries for the {monthAndYear(drawMonth)} draw</span>
+        {campaign.dataAsOf && (
+          <span className="asof">
+            No. of passes as of <b>{shortDate(campaign.dataAsOf)}</b>
+          </span>
+        )}
+        <span className="note">
+          Activity recorded after this date counts toward the following draw.
+        </span>
+      </div>
+
       <div className="tablewrap card" style={{ boxShadow: "none" }}>
         <table className="ptable stack">
           <thead>
@@ -92,6 +109,7 @@ export function AdvisorPage() {
               <th scope="col">Email</th>
               <th scope="col" className="num">Gold Passes</th>
               <th scope="col" className="num">Blue Passes</th>
+              <th scope="col" className="num">Total</th>
               <th scope="col">Details</th>
             </tr>
           </thead>
@@ -101,11 +119,22 @@ export function AdvisorPage() {
                 <td className="name" data-label="Name">{row.client.fullName}</td>
                 <td data-label="Mobile">{formatMobile(row.client.mobile)}</td>
                 <td data-label="Email">{row.client.email}</td>
-                <td className={`num${row.gold === 0 ? " zero" : ""}`} data-label="Gold Passes">
+                <td
+                  className={`num gold-val${row.gold === 0 ? " zero" : ""}`}
+                  data-label="Gold Passes"
+                >
                   {row.gold}
                 </td>
-                <td className={`num${row.blue === 0 ? " zero" : ""}`} data-label="Blue Passes">
+                <td
+                  className={`num blue-val${row.blue === 0 ? " zero" : ""}`}
+                  data-label="Blue Passes"
+                >
                   {row.blue}
+                </td>
+                {/* Gold and blue enter separate draws, so this is a quick read of
+                    how active the client is rather than odds in either draw. */}
+                <td className="num total-val" data-label="Total">
+                  {row.gold + row.blue}
                 </td>
                 <td data-label="Details">
                   <button
@@ -122,7 +151,7 @@ export function AdvisorPage() {
 
             {clients.length === 0 && (
               <tr>
-                <td colSpan={6} style={{ padding: 0 }}>
+                <td colSpan={7} style={{ padding: 0 }}>
                   <EmptyState title="No clients holding passes yet">
                     None of your clients has earned a boarding pass in this campaign so
                     far. They appear here as soon as a qualifying activity is recorded.

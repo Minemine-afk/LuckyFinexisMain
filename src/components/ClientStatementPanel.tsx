@@ -36,7 +36,7 @@ export function ClientStatementPanel({
 
       {blocks.map((block) => (
         <section className="block" key={block.passType}>
-          <h3 className="block-title">
+          <h3 className={`block-title ${block.passType}-title`}>
             Total {passTypeLabel(block.passType)} Boarding Passes:{" "}
             <span className="total">{block.total}</span>
           </h3>
