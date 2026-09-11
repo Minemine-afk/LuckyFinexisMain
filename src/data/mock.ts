@@ -12,9 +12,12 @@ import type {
 
 /**
  * The demo dataset. Everything here is invented — the numbers are chosen to
- * reproduce the campaign mockups exactly (Jake Peralta at 21 gold / 50 blue,
- * winning this month's draw with an OSIM uJolly on a blue pass) so the UI can
- * be reviewed before a Supabase project exists.
+ * reproduce the campaign mockups (Jake Peralta entering 50 blue passes into last
+ * month's draw and winning an OSIM uJolly with them) so the UI can be reviewed
+ * before a Supabase project exists.
+ *
+ * Between them the five clients cover every state the pass rules can produce:
+ * live, spent by a draw that has run, won, pending confirmation, and voided.
  *
  * Set VITE_USE_MOCK=false and the app talks to Supabase instead; nothing outside
  * `src/data/` knows the difference.
@@ -25,11 +28,11 @@ const CAMPAIGN_ID = "cmp-atw-2026";
 /**
  * Demo dates are relative to the current month rather than fixed.
  *
- * Blue passes expire at the end of the month they are earned, so a fixed date
- * would mean the demo showed every blue pass expired a month after it was
- * written — the statement would read zero and look broken rather than
- * demonstrating the rule. Anchoring to today keeps the figures matching the
- * campaign mockups whenever the demo is opened.
+ * Blue passes are spent by the monthly draw they enter, so a fixed date would
+ * mean the demo showed every blue pass used up a month after it was written —
+ * the statement would read zero and look broken rather than demonstrating the
+ * rule. Anchoring to today keeps the figures matching the campaign mockups
+ * whenever the demo is opened.
  */
 const NOW = new Date();
 
@@ -45,6 +48,8 @@ const dayIn = (delta: number, day: number): string =>
 
 const THIS_MONTH = monthsFromNow(0);
 const LAST_MONTH = monthsFromNow(-1);
+/** The month the campaign closes, and so the month the single gold draw runs. */
+const FINAL_MONTH = monthsFromNow(4);
 
 /** Last day of the month `delta` months out, for the campaign close date. */
 const endOfMonth = (delta: number): string => {
@@ -62,13 +67,10 @@ export const campaign: Campaign = {
   // to Supabase Storage. The demo ships an inline placeholder instead.
   detailsImageUrl: null,
   dataAsOf: dayIn(0, Math.min(NOW.getUTCDate(), 28)),
-  // The mockup shows Jake keeping all 50 blue passes after winning in August,
-  // so a win does not spend passes. Flip this once the campaign terms are
-  // confirmed — `consumedByDrawId` on the ledger already supports it.
-  consumePassesOnWin: false,
-  // Blue passes are spent in the month they are earned; gold accumulates for
-  // the whole campaign.
-  passExpiry: { gold: "campaign_end", blue: "month_end" },
+  // Blue is drawn every month, so blue passes are used up every month. Gold is
+  // drawn once at campaign close, so gold accumulates until then. If gold turns
+  // out to be drawn monthly too, this line is the only thing that changes.
+  drawSchedule: { gold: "campaign_end", blue: "monthly" },
 };
 
 export const activities: Activity[] = [
@@ -190,21 +192,26 @@ const ev = (
 };
 
 export const passEvents: PassEvent[] = [
-  // Jake Peralta — 21 gold, 50 blue, exactly as the client statement mockup
-  // shows. His gold was earned last month and carries forward; his blue is all
-  // from this month, because blue would otherwise have expired.
+  // Jake Peralta — the worked example the mockups are built around. He put 50
+  // blue passes into last month's draw and won it, so those 50 are gone; this
+  // month he has started again from zero. His 21 gold are untouched, waiting on
+  // the single gold draw at campaign close.
   ev("cli-1", "act-gold-purchase", 1, dayIn(-1, 4), "POL-88213"),
-  ev("cli-1", "act-blue-referral", 5, dayIn(0, 3), "Referral batch"),
-  ev("cli-1", "act-blue-event", 2, dayIn(0, 11), "Market outlook briefing"),
-  ev("cli-1", "act-blue-guest", 3, dayIn(0, 11), "Market outlook briefing"),
+  ev("cli-1", "act-blue-referral", 5, dayIn(-1, 3), "Referral batch"),
+  ev("cli-1", "act-blue-event", 2, dayIn(-1, 11), "Market outlook briefing"),
+  ev("cli-1", "act-blue-guest", 3, dayIn(-1, 11), "Market outlook briefing"),
+  ev("cli-1", "act-blue-referral", 1, dayIn(0, 6), "Referral: G. Linetti"),
+  ev("cli-1", "act-blue-event", 1, dayIn(0, 9), "Retirement planning clinic"),
 
-  // Rosa Diaz — two qualifying cases carried forward, a handful of live blue.
+  // Rosa Diaz — passes spent by a draw she did not win, which is the ordinary
+  // case and the one the statement has to explain gracefully.
   ev("cli-2", "act-gold-purchase", 2, dayIn(-1, 8), "POL-88240 / POL-88241"),
-  ev("cli-2", "act-blue-referral", 1, dayIn(0, 6), "Referral: A. Diaz"),
+  ev("cli-2", "act-blue-referral", 2, dayIn(-1, 6), "Referral: A. Diaz"),
+  ev("cli-2", "act-blue-referral", 1, dayIn(0, 6), "Referral: M. Diaz"),
   ev("cli-2", "act-blue-event", 2, dayIn(0, 14), "Retirement planning clinic"),
 
-  // Terry Jeffords — the worked example of expiry. Last month's blue is spent
-  // and no longer counts; only this month's testimonial and app download do.
+  // Terry Jeffords — won last month's draw on a small entry, showing that the
+  // number of passes is odds rather than entitlement.
   ev("cli-3", "act-blue-referral", 2, dayIn(-1, 15), "Referral: S. Jeffords"),
   ev("cli-3", "act-blue-event", 1, dayIn(-1, 19), "Mid-year market outlook"),
   ev("cli-3", "act-blue-guest", 1, dayIn(-1, 19), "Guest: Sharon"),
@@ -222,16 +229,20 @@ export const passEvents: PassEvent[] = [
   ev("cli-5", "act-blue-event", 1, dayIn(0, 5), "Retirement planning clinic"),
 ];
 
+/**
+ * Gold and blue are drawn on different schedules, so they are separate rows.
+ * Only last month's blue draw has been run; this month's is still collecting,
+ * and the gold draw waits for campaign close.
+ */
 export const draws: Draw[] = [
-  { id: "draw-prev", campaignId: CAMPAIGN_ID, drawMonth: LAST_MONTH, status: "published", drawnAt: `${THIS_MONTH}-01` },
-  { id: "draw-current", campaignId: CAMPAIGN_ID, drawMonth: THIS_MONTH, status: "published", drawnAt: `${THIS_MONTH}-15` },
+  { id: "draw-blue-prev", campaignId: CAMPAIGN_ID, drawMonth: LAST_MONTH, passType: "blue", isDrawn: true, drawnAt: `${THIS_MONTH}-01` },
+  { id: "draw-blue-now", campaignId: CAMPAIGN_ID, drawMonth: THIS_MONTH, passType: "blue", isDrawn: false, drawnAt: null },
+  { id: "draw-gold-final", campaignId: CAMPAIGN_ID, drawMonth: FINAL_MONTH, passType: "gold", isDrawn: false, drawnAt: null },
 ];
 
 export const drawWinners: DrawWinner[] = [
-  { id: "win-1", drawId: "draw-prev", drawMonth: LAST_MONTH, clientId: "cli-3", displayName: "Terry J.", prize: "Dyson Airwrap", passType: "blue" },
-  { id: "win-2", drawId: "draw-prev", drawMonth: LAST_MONTH, clientId: "cli-2", displayName: "Rosa D.", prize: "Business class upgrade voucher", passType: "gold" },
-  { id: "win-3", drawId: "draw-current", drawMonth: THIS_MONTH, clientId: "cli-1", displayName: "Jake P.", prize: "OSIM uJolly", passType: "blue" },
-  { id: "win-4", drawId: "draw-current", drawMonth: THIS_MONTH, clientId: "cli-4", displayName: "Gina L.", prize: "Apple Watch Series 10", passType: "blue" },
+  { id: "win-1", drawId: "draw-blue-prev", drawMonth: LAST_MONTH, clientId: "cli-1", displayName: "Jake P.", prize: "OSIM uJolly", passType: "blue" },
+  { id: "win-2", drawId: "draw-blue-prev", drawMonth: LAST_MONTH, clientId: "cli-3", displayName: "Terry J.", prize: "Dyson Airwrap", passType: "blue" },
 ];
 
 export const demoViewers: Viewer[] = [

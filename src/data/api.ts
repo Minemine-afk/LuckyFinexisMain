@@ -37,8 +37,13 @@ export interface PortalApi {
   /** The full statement behind the magnifier icon, and the client's own page. */
   getClientStatement(clientId: string, campaignId: string): Promise<ClientStatement>;
 
-  /** Draws whose winners have been published — drives the month chips. */
-  getPublishedDraws(campaignId: string): Promise<Draw[]>;
+  /**
+   * Every draw in the campaign, drawn or not. The whole list is needed, not just
+   * the published ones: which draws have run is what decides whether a pass is
+   * still live, and the ones still to come are what a client's remaining passes
+   * are waiting for.
+   */
+  getDraws(campaignId: string): Promise<Draw[]>;
   getWinners(campaignId: string, drawMonth: DrawMonth): Promise<DrawWinner[]>;
 
   /** Admin: dry-run an upload. Nothing is written. */

@@ -24,10 +24,15 @@ export type PassType = "gold" | "blue";
  */
 export type PassStatus = "valid" | "pending" | "void";
 
-export type DrawStatus = "scheduled" | "drawn" | "published";
-
-/** Re-exported from the pass rules so `Campaign` can be read on its own. */
-export type PassExpiry = "month_end" | "campaign_end";
+/**
+ * How often a draw is held for a pass type. `monthly` means a pass enters the
+ * draw for the month it was earned; `campaign_end` means passes accumulate into
+ * a single draw at campaign close.
+ *
+ * This is what decides when a pass is spent, because a pass is spent by the
+ * draw it enters — see `src/lib/passes.ts`.
+ */
+export type DrawSchedule = "monthly" | "campaign_end";
 
 /** A draw month, always "YYYY-MM". Lexicographic order is chronological order. */
 export type DrawMonth = string;
@@ -42,14 +47,13 @@ export interface Campaign {
   detailsImageUrl: string | null;
   /** Date of the most recent committed CSV upload — drives "Updated as of". */
   dataAsOf: string | null;
-  /** Whether winning a draw spends the passes that were entered into it. */
-  consumePassesOnWin: boolean;
   /**
-   * How long each pass type keeps counting. Blue passes are typically spent in
-   * the month they are earned; gold passes carry through the campaign. Held per
-   * campaign because it is a campaign term, not a property of the software.
+   * When each pass type is drawn, and so when it is used up. Blue runs monthly;
+   * gold accumulates into one draw at campaign close. Held per campaign because
+   * it is a campaign term, not a property of the software — if gold turns out to
+   * be drawn monthly too, this is the one value that changes.
    */
-  passExpiry: Record<PassType, PassExpiry>;
+  drawSchedule: Record<PassType, DrawSchedule>;
 }
 
 export interface Activity {
@@ -100,17 +104,27 @@ export interface PassEvent {
   drawMonth: DrawMonth;
   status: PassStatus;
   voidReason: string | null;
-  /** Set when this pass was spent winning a draw. */
+  /**
+   * Set when a specific pass was retired by hand. Ordinary spending is derived
+   * from whether the pass's draw has run, so this stays null for almost every
+   * row — it exists for administrative corrections.
+   */
   consumedByDrawId: string | null;
   /** Policy number, referral name, event name — the thing that makes a row unique. */
   reference: string;
 }
 
+/**
+ * One draw: a pass type, and the month it is drawn for. Gold and blue are drawn
+ * separately, so a month can carry one row of each.
+ */
 export interface Draw {
   id: string;
   campaignId: string;
   drawMonth: DrawMonth;
-  status: DrawStatus;
+  passType: PassType;
+  /** Once true, every pass entered into this draw is spent. */
+  isDrawn: boolean;
   drawnAt: string | null;
 }
 
@@ -135,11 +149,13 @@ export interface Viewer {
   advisorId: string | null;
 }
 
-/** One row of the advisor's client table. */
+/** One row of the advisor's client table. Counts are live passes only. */
 export interface AdvisorClientRow {
   client: ClientRecord;
   gold: number;
   blue: number;
+  /** True once this client has won a published draw — drives the Winner badge. */
+  won: boolean;
 }
 
 /** Everything the client statement panel renders. */

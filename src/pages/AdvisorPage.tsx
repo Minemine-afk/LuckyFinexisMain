@@ -32,7 +32,7 @@ export function AdvisorPage() {
     const [activities, clients, draws] = await Promise.all([
       api.getActivities(campaign.id),
       api.getAdvisorClients(advisorId, campaign.id),
-      api.getPublishedDraws(campaign.id),
+      api.getDraws(campaign.id),
     ]);
     return { campaign, activities, clients, draws };
   }, [advisorId]);
@@ -54,6 +54,20 @@ export function AdvisorPage() {
   const { campaign, activities, clients, draws } = page.data;
   const drawMonth = currentDrawMonth(campaign);
 
+  // One chip per month that has actually been drawn. Gold and blue are separate
+  // rows and can fall in the same month, so the months are de-duplicated.
+  const drawnMonths = [
+    ...new Set(draws.filter((d) => d.isDrawn).map((d) => d.drawMonth)),
+  ].sort();
+
+  // The draw each pass type is currently collecting for, so the cut-off strip
+  // can say where gold is going as well as blue.
+  const nextDraw = (passType: "gold" | "blue") =>
+    draws
+      .filter((d) => d.passType === passType && !d.isDrawn)
+      .sort((a, b) => a.drawMonth.localeCompare(b.drawMonth))[0] ?? null;
+  const nextGold = nextDraw("gold");
+
   return (
     <div className="page">
       <header className="page-head">
@@ -66,19 +80,19 @@ export function AdvisorPage() {
         </p>
       </header>
 
-      {draws.length > 0 && (
+      {drawnMonths.length > 0 && (
         <div className="toolbar">
           <span className="label">View past winners:</span>
           <div className="chips">
-            {draws.map((d) => (
+            {drawnMonths.map((month) => (
               <button
-                key={d.id}
+                key={month}
                 type="button"
                 className="chip"
-                aria-pressed={winnersMonth === d.drawMonth}
-                onClick={() => setWinnersMonth(d.drawMonth)}
+                aria-pressed={winnersMonth === month}
+                onClick={() => setWinnersMonth(month)}
               >
-                {monthName(d.drawMonth)}
+                {monthName(month)}
               </button>
             ))}
           </div>
@@ -87,7 +101,11 @@ export function AdvisorPage() {
 
       {/* The cut-off, up front. The statement footer says "Updated as of" too,
           but a consultant reading the table needs it before opening anything:
-          an activity after this date is in the *next* draw, not this one. */}
+          an activity after this date is in the *next* draw, not this one.
+
+          Which draw the counts below are for now matters more than it did, since
+          a pass is used up by the draw it enters — and gold and blue are not
+          going into the same one. */}
       <div className="cutoff" role="note">
         <span className="draw">Entries for the {monthAndYear(drawMonth)} draw</span>
         {campaign.dataAsOf && (
@@ -96,6 +114,10 @@ export function AdvisorPage() {
           </span>
         )}
         <span className="note">
+          Blue passes enter the {monthName(drawMonth)} draw and are used up by it.{" "}
+          {nextGold
+            ? `Gold passes are held for the ${monthAndYear(nextGold.drawMonth)} draw.`
+            : "Gold passes are held for the campaign draw."}{" "}
           Activity recorded after this date counts toward the following draw.
         </span>
       </div>
@@ -116,7 +138,13 @@ export function AdvisorPage() {
           <tbody>
             {clients.map((row) => (
               <tr key={row.client.id}>
-                <td className="name" data-label="Name">{row.client.fullName}</td>
+                <td className="name" data-label="Name">
+                  {row.client.fullName}
+                  {/* A consultant scanning a column of zeroes needs to see that
+                      this one is zero because they won, not because they never
+                      took part. */}
+                  {row.won && <span className="winner-badge">Winner</span>}
+                </td>
                 <td data-label="Mobile">{formatMobile(row.client.mobile)}</td>
                 <td data-label="Email">{row.client.email}</td>
                 <td
@@ -181,6 +209,7 @@ export function AdvisorPage() {
           <ClientStatementPanel
             campaign={campaign}
             activities={activities}
+            draws={draws}
             statement={statement.data}
           />
         )}

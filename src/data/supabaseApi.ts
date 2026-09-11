@@ -1,6 +1,6 @@
 import { supabase } from "../lib/supabase";
 import type { UploadPreview } from "../lib/ingest";
-import { currentDrawMonth, passesForDraw } from "../lib/passes";
+import { drawnKeys, livePasses } from "../lib/passes";
 import { shortenName } from "../lib/format";
 import type {
   Activity,
@@ -151,10 +151,14 @@ const toClient = (r: ClientRow): ClientRecord => ({
 
 /**
  * A ledger row becomes a pass event. `draw_id` is read as the draw the pass is
- * entered into, so it sets the first month the pass counts for; without one the
- * month is derived from `occurred_on`, which is the same rule the campaign runs
- * on paper. Nothing is treated as spent, matching the campaign term that winning
- * does not consume passes.
+ * entered into, so it sets the month the pass counts for; without one the month
+ * is derived from `occurred_on`, which is the same rule the campaign runs on
+ * paper.
+ *
+ * `consumedByDrawId` stays null: whether a pass has been used up is derived from
+ * whether its draw has run, so the ledger never has to be rewritten when a draw
+ * happens. The field exists for administrative corrections, which this schema
+ * has no column for yet.
  */
 function toPassEvent(r: LedgerRow, drawMonthById: Map<string, DrawMonth>): PassEvent {
   const fromDraw = r.draw_id ? drawMonthById.get(r.draw_id) : undefined;
@@ -179,9 +183,8 @@ const toDraw = (r: DrawRow): Draw => ({
   id: r.id,
   campaignId: r.campaign_id,
   drawMonth: drawMonthOfRow(r),
-  // The schema records only whether a draw has happened, so a drawn draw is a
-  // published one; there is no held-back state to represent.
-  status: r.is_drawn ? "published" : "scheduled",
+  passType: asPassType(r.pass_type),
+  isDrawn: r.is_drawn,
   drawnAt: r.is_drawn ? r.draw_date : null,
 });
 
@@ -304,8 +307,10 @@ export const supabaseApi: PortalApi = {
       // rules rendered from challenge_types, which is a useful page either way.
       detailsImageUrl: null,
       dataAsOf: latest?.date_updated ?? null,
-      consumePassesOnWin: false,
-      passExpiry: { gold: "campaign_end", blue: "month_end" },
+      // Not a column yet, so the campaign terms are stated here: blue is drawn
+      // every month, gold once at campaign close. Move this to `campaigns` when
+      // a second campaign needs different terms.
+      drawSchedule: { gold: "campaign_end", blue: "monthly" },
     };
   },
 
@@ -324,7 +329,6 @@ export const supabaseApi: PortalApi = {
   async getAdvisorClients(advisorId, campaignId) {
     const db = supabase();
     const campaign = await this.getCampaign();
-    const drawMonth = currentDrawMonth(campaign);
 
     const [{ data: clientRows, error: clientErr }, activities, draws] = await Promise.all([
       db
@@ -333,35 +337,46 @@ export const supabaseApi: PortalApi = {
         .eq("advisor_id", advisorId)
         .order("client_name"),
       this.getActivities(campaignId),
-      this.getPublishedDraws(campaignId),
+      this.getDraws(campaignId),
     ]);
     if (clientErr) fail("Could not load your clients", clientErr);
 
     const clients = (clientRows as ClientRow[]).map(toClient);
     if (clients.length === 0) return [];
 
-    const { data: ledgerRows, error: ledgerErr } = await db
-      .from("pass_ledger")
-      .select("*")
-      .eq("campaign_id", campaignId)
-      .in("client_id", clients.map((c) => c.id));
+    const ids = clients.map((c) => c.id);
+    const [{ data: ledgerRows, error: ledgerErr }, { data: prizeRows }] = await Promise.all([
+      db.from("pass_ledger").select("*").eq("campaign_id", campaignId).in("client_id", ids),
+      db.from("prizes_won").select("client_id, draw_id").in("client_id", ids),
+    ]);
     if (ledgerErr) fail("Could not load pass activity", ledgerErr);
 
     const drawMonths = new Map(draws.map((d) => [d.id, d.drawMonth]));
     const events = (ledgerRows as LedgerRow[]).map((r) => toPassEvent(r, drawMonths));
+    const drawn = drawnKeys(draws);
+
+    // A prize only counts once its draw has been run, so a result entered ahead
+    // of the draw does not put a Winner badge on the table early.
+    const drawnIds = new Set(draws.filter((d) => d.isDrawn).map((d) => d.id));
+    const winners = new Set(
+      ((prizeRows ?? []) as { client_id: string; draw_id: string }[])
+        .filter((p) => drawnIds.has(p.draw_id))
+        .map((p) => p.client_id),
+    );
 
     return clients
       .map((client) => {
         const mine = events.filter((e) => e.clientId === client.id);
         return {
           client,
-          gold: passesForDraw(mine, "gold", activities, campaign, drawMonth),
-          blue: passesForDraw(mine, "blue", activities, campaign, drawMonth),
+          gold: livePasses(mine, "gold", activities, campaign, drawn),
+          blue: livePasses(mine, "blue", activities, campaign, drawn),
+          won: winners.has(client.id),
           hasAny: mine.length > 0,
         };
       })
       .filter((r) => r.hasAny)
-      .map(({ client, gold, blue }) => ({ client, gold, blue }))
+      .map(({ client, gold, blue, won }) => ({ client, gold, blue, won }))
       .sort((a, b) => b.gold + b.blue - (a.gold + a.blue));
   },
 
@@ -385,7 +400,7 @@ export const supabaseApi: PortalApi = {
     if (clientErr || !clientRow) fail("Could not load the client", clientErr);
     if (ledgerErr) fail("Could not load pass activity", ledgerErr);
 
-    const draws = await this.getPublishedDraws(campaignId);
+    const draws = await this.getDraws(campaignId);
     const drawById = new Map(draws.map((d) => [d.id, d]));
 
     const { data: prizeRows, error: prizeErr } = await db
@@ -394,26 +409,15 @@ export const supabaseApi: PortalApi = {
       .eq("client_id", clientId);
     if (prizeErr) fail("Could not load prizes", prizeErr);
 
-    const { data: drawTypes } = await db
-      .from("draws")
-      .select("id, pass_type")
-      .eq("campaign_id", campaignId);
-    const passTypeByDraw = new Map(
-      ((drawTypes ?? []) as { id: string; pass_type: string | null }[]).map((d) => [
-        d.id,
-        asPassType(d.pass_type),
-      ]),
-    );
-
     return {
       client: toClient(clientRow!),
       events: (ledgerRows as LedgerRow[]).map((r) =>
         toPassEvent(r, new Map(draws.map((d) => [d.id, d.drawMonth]))),
       ),
       winners: (prizeRows as PrizeRow[])
-        // Only prizes from a draw that has actually happened; an unpublished
-        // result is not the portal's news to break.
-        .filter((p) => drawById.has(p.draw_id))
+        // Only prizes from a draw that has actually been run; a result entered
+        // ahead of the draw is not the portal's news to break.
+        .filter((p) => drawById.get(p.draw_id)?.isDrawn)
         .map((p) => ({
           id: p.id,
           drawId: p.draw_id,
@@ -421,25 +425,23 @@ export const supabaseApi: PortalApi = {
           clientId: p.client_id,
           displayName: shortenName(clientRow!.client_name),
           prize: p.prize_won,
-          passType: passTypeByDraw.get(p.draw_id) ?? "blue",
+          passType: drawById.get(p.draw_id)!.passType,
         })),
     };
   },
 
-  async getPublishedDraws(campaignId) {
+  async getDraws(campaignId) {
     const { data, error } = await supabase()
       .from("draws")
       .select("id, campaign_id, monthly_draw, draw_date, pass_type, is_drawn")
       .eq("campaign_id", campaignId)
-      .eq("is_drawn", true)
       .order("draw_date");
-    if (error) fail("Could not load past draws", error);
+    if (error) fail("Could not load draws", error);
 
-    // The schema runs a separate draw per pass type each month; the portal shows
-    // one chip per month, so same-month draws collapse to a single entry.
-    const rows = (data as DrawRow[]).map(toDraw);
-    const seen = new Set<DrawMonth>();
-    return rows.filter((d) => (seen.has(d.drawMonth) ? false : (seen.add(d.drawMonth), true)));
+    // Every row, drawn or not, and one per pass type: which draws have run is
+    // what decides whether a pass is still live, and the ones still to come are
+    // what a client's remaining passes are waiting for.
+    return (data as DrawRow[]).map(toDraw);
   },
 
   async getWinners(campaignId: string, drawMonth: DrawMonth): Promise<DrawWinner[]> {

@@ -7,7 +7,7 @@ import {
   type IngestContext,
   type UploadPreview,
 } from "../lib/ingest";
-import { currentDrawMonth, passesForDraw } from "../lib/passes";
+import { drawnKeys, livePasses } from "../lib/passes";
 import type {
   Activity,
   AdvisorClientRow,
@@ -128,7 +128,12 @@ export const mockApi: PortalApi = {
 
   async getAdvisorClients(advisorId, campaignId): Promise<AdvisorClientRow[]> {
     const mine = seed.clients.filter((c) => c.advisorId === advisorId);
-    const drawMonth = currentDrawMonth(seed.campaign);
+    const drawn = drawnKeys(seed.draws.filter((d) => d.campaignId === campaignId));
+    const winnerIds = new Set(
+      seed.drawWinners
+        .filter((w) => drawn.has(`${w.passType}|${w.drawMonth}`))
+        .map((w) => w.clientId),
+    );
     const rows = mine
       .map((client) => {
         const events = ledger.filter(
@@ -136,15 +141,16 @@ export const mockApi: PortalApi = {
         );
         return {
           client,
-          gold: passesForDraw(events, "gold", seed.activities, seed.campaign, drawMonth),
-          blue: passesForDraw(events, "blue", seed.activities, seed.campaign, drawMonth),
+          gold: livePasses(events, "gold", seed.activities, seed.campaign, drawn),
+          blue: livePasses(events, "blue", seed.activities, seed.campaign, drawn),
+          won: winnerIds.has(client.id),
           hasAny: events.length > 0,
         };
       })
       // A client with nothing in the ledger is not in the campaign yet, so the
       // advisor's table stays a list of people who have actually earned something.
       .filter((r) => r.hasAny)
-      .map(({ client, gold, blue }) => ({ client, gold, blue }));
+      .map(({ client, gold, blue, won }) => ({ client, gold, blue, won }));
 
     return delay(rows.sort((a, b) => b.gold + b.blue - (a.gold + a.blue)));
   },
@@ -152,32 +158,33 @@ export const mockApi: PortalApi = {
   async getClientStatement(clientId, campaignId): Promise<ClientStatement> {
     const client = seed.clients.find((c) => c.id === clientId);
     if (!client) throw new ApiError("Client not found.", 404);
-    const publishedDrawIds = new Set(
-      seed.draws.filter((d) => d.status === "published").map((d) => d.id),
-    );
+    const drawnIds = new Set(seed.draws.filter((d) => d.isDrawn).map((d) => d.id));
     return delay({
       client,
       events: ledger.filter((e) => e.clientId === clientId && e.campaignId === campaignId),
       winners: seed.drawWinners.filter(
-        (w) => w.clientId === clientId && publishedDrawIds.has(w.drawId),
+        (w) => w.clientId === clientId && drawnIds.has(w.drawId),
       ),
     });
   },
 
-  async getPublishedDraws(campaignId): Promise<Draw[]> {
+  async getDraws(campaignId): Promise<Draw[]> {
     return delay(
       seed.draws
-        .filter((d) => d.campaignId === campaignId && d.status === "published")
+        .filter((d) => d.campaignId === campaignId)
         .sort((a, b) => a.drawMonth.localeCompare(b.drawMonth)),
     );
   },
 
   async getWinners(campaignId: string, drawMonth: DrawMonth): Promise<DrawWinner[]> {
-    const draw = seed.draws.find(
-      (d) => d.campaignId === campaignId && d.drawMonth === drawMonth,
+    // A month can hold a gold draw and a blue draw, so this is every winner of
+    // every draw that has actually been run in that month.
+    const ids = new Set(
+      seed.draws
+        .filter((d) => d.campaignId === campaignId && d.drawMonth === drawMonth && d.isDrawn)
+        .map((d) => d.id),
     );
-    if (!draw || draw.status !== "published") return delay([]);
-    return delay(seed.drawWinners.filter((w) => w.drawId === draw.id));
+    return delay(seed.drawWinners.filter((w) => ids.has(w.drawId)));
   },
 
   async previewUpload(file, campaignId): Promise<UploadPreview> {

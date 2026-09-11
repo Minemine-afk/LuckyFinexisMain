@@ -1,29 +1,43 @@
-import { activityRule, monthName, passTypeLabel, shortDate } from "../lib/format";
-import { buildPassBlocks, currentDrawMonth } from "../lib/passes";
-import type { Activity, Campaign, ClientStatement } from "../lib/types";
+import { useState } from "react";
+import { activityRule, monthAndYear, monthName, passTypeLabel, shortDate } from "../lib/format";
+import { buildDrawHistory, buildPassBlocks, drawnKeys } from "../lib/passes";
+import type { Activity, Campaign, ClientStatement, Draw } from "../lib/types";
 
 /**
  * The client's boarding pass statement: one table per pass type listing every
  * qualifying activity and what it has earned, then any prizes won.
  *
- * The same panel is what a client sees on their own page and what an advisor
- * gets behind the magnifier icon, so there is exactly one description of how a
- * client's passes add up.
+ * The counts are live passes only — a pass is used up by the draw it enters, so
+ * anything already drawn for has gone. That is the number most likely to
+ * surprise a client, so the passes they have spent are named directly beneath
+ * the table rather than left to be discovered, and Previous Passes shows where
+ * every one of them went.
  */
 export function ClientStatementPanel({
   campaign,
   activities,
+  draws,
   statement,
   showHeading = true,
 }: {
   campaign: Campaign;
   activities: Activity[];
+  draws: Draw[];
   statement: ClientStatement;
   showHeading?: boolean;
 }) {
-  const drawMonth = currentDrawMonth(campaign);
-  const blocks = buildPassBlocks(activities, statement.events, campaign, drawMonth);
+  const [historyOpen, setHistoryOpen] = useState(false);
+
+  const drawn = drawnKeys(draws);
+  const blocks = buildPassBlocks(activities, statement.events, campaign, drawn);
   const { winners } = statement;
+  const history = buildDrawHistory(
+    activities,
+    statement.events,
+    campaign,
+    drawn,
+    winners,
+  );
 
   return (
     <div className="statement">
@@ -65,17 +79,16 @@ export function ClientStatementPanel({
           </div>
 
           {/* Only shown when there is something to explain, so a clean account
-              reads exactly like the mockup. Expired passes are named rather than
+              reads exactly like the mockup. Spent passes are named rather than
               quietly dropped — a client who remembers earning them deserves to
               see where they went. */}
-          {(block.pending > 0 || block.voided > 0 || block.expired > 0 ||
-            block.upcoming > 0) && (
+          {(block.pending > 0 || block.voided > 0 || block.spent > 0) && (
             <p className="block-note">
-              {block.expired > 0 && (
+              {block.spent > 0 && (
                 <>
-                  {block.expired} {passTypeLabel(block.passType).toLowerCase()}{" "}
-                  {block.expired === 1 ? "pass entered an earlier draw" : "passes entered earlier draws"}{" "}
-                  and {block.expired === 1 ? "has" : "have"} now expired.{" "}
+                  {block.spent} {passTypeLabel(block.passType).toLowerCase()}{" "}
+                  {block.spent === 1 ? "pass has" : "passes have"} already been
+                  entered into a draw and used up.{" "}
                 </>
               )}
               {block.pending > 0 && (
@@ -83,12 +96,6 @@ export function ClientStatementPanel({
                   {block.pending} {passTypeLabel(block.passType).toLowerCase()}{" "}
                   {block.pending === 1 ? "pass is" : "passes are"} pending confirmation and
                   not yet in the draw.{" "}
-                </>
-              )}
-              {block.upcoming > 0 && (
-                <>
-                  {block.upcoming} {block.upcoming === 1 ? "pass enters" : "passes enter"} a
-                  later draw.{" "}
                 </>
               )}
               {block.voided > 0 && (
@@ -132,6 +139,79 @@ export function ClientStatementPanel({
               </tbody>
             </table>
           </div>
+        </section>
+      )}
+
+      {/* Folded away by default: the tables above are the account as it stands,
+          and history is what you go looking for once the total surprises you. */}
+      {history.length > 0 && (
+        <section className="block">
+          <button
+            type="button"
+            className="disclosure"
+            aria-expanded={historyOpen}
+            onClick={() => setHistoryOpen((open) => !open)}
+          >
+            <span className="caret" aria-hidden="true">
+              {historyOpen ? "▾" : "▸"}
+            </span>
+            Previous Passes
+          </button>
+
+          {historyOpen && (
+            <div className="tablewrap">
+              {/* Stacked into cards on a narrow screen: the outcome is the whole
+                  point of this table, and it is the last column, so it would be
+                  the first thing scrolled off. */}
+              <table className="ptable stack">
+                <thead>
+                  <tr>
+                    <th scope="col">Draw</th>
+                    <th scope="col">Earned From</th>
+                    <th scope="col" className="num">
+                      Passes Entered
+                    </th>
+                    <th scope="col">Outcome</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.map((entry) => (
+                    <tr
+                      key={`${entry.passType}-${entry.drawMonth}`}
+                      className={entry.state === "won" ? "won-row" : undefined}
+                    >
+                      <td className="name hist-draw" data-label="Draw">
+                        {monthAndYear(entry.drawMonth)}{" "}
+                        <span className={`badge ${entry.passType}`}>
+                          {passTypeLabel(entry.passType)}
+                        </span>
+                      </td>
+                      <td data-label="Earned from">{entry.parts.join(", ") || "—"}</td>
+                      <td className="num" data-label="Passes entered">
+                        {entry.passes}
+                      </td>
+                      <td data-label="Outcome">
+                        {entry.state === "won" && (
+                          <span className="outcome won">Won — {entry.prize}</span>
+                        )}
+                        {entry.state === "spent" && (
+                          <span className="outcome spent">Not drawn — passes used</span>
+                        )}
+                        {entry.state === "open" && (
+                          <span className="outcome open">Still in the draw</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="block-note">
+                Every pass entered into a draw is used up by it, whether or not it
+                wins. Passes marked <b>still in the draw</b> are the ones counted
+                in the totals above.
+              </p>
+            </div>
+          )}
         </section>
       )}
 

@@ -417,6 +417,87 @@ table.ptable tbody tr:last-child td:last-child {
   color: var(--good);
 }
 
+/* Sits beside a client's name in the consultant's table. Deliberately quiet:
+   it explains a zero in the pass columns, it is not a celebration. */
+.winner-badge {
+  display: inline-block;
+  margin-left: 8px;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: var(--good-soft);
+  border: 1px solid #b9dfd1;
+  color: var(--good);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------- previous passes */
+
+.disclosure {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.disclosure:hover {
+  border-color: var(--brand-line);
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.disclosure .caret {
+  font-size: 11px;
+  line-height: 1;
+}
+
+.disclosure[aria-expanded="true"] {
+  margin-bottom: 12px;
+}
+
+/* Keeps the month and its pass-type badge on one line, so the rows line up
+   rather than one wrapping and the next not. */
+.ptable td.hist-draw {
+  white-space: nowrap;
+}
+
+.outcome {
+  font-size: 13px;
+}
+
+.outcome.won {
+  color: var(--good);
+  font-weight: 600;
+}
+
+.outcome.spent {
+  color: var(--ink-3);
+}
+
+.outcome.open {
+  color: var(--brand);
+  font-weight: 500;
+}
+
+/* The won row is tinted rather than badged: the outcome cell already says it,
+   and a whole tinted row is what the eye finds when scanning the history.
+   `:nth-child(n)` is here to out-specify the zebra striping, which would
+   otherwise win on every even row and tint only half the highlight. */
+table.ptable tbody tr.won-row:nth-child(n) td {
+  background: var(--good-soft);
+}
+
 /* ---------------------------------------------------------------- buttons */
 
 .btn {
@@ -929,8 +1010,10 @@ dialog.modal.wide {
     flex: 0 0 auto;
   }
 
-  /* The name leads the card, so it gets no label and sits on its own line. */
-  table.ptable.stack tbody tr:nth-child(n) td[data-label="Name"] {
+  /* The first cell leads the card — the client's name, or the draw in the
+     history table — so it gets no label and sits on its own line. */
+  table.ptable.stack tbody tr:nth-child(n) td[data-label="Name"],
+  table.ptable.stack tbody tr:nth-child(n) td[data-label="Draw"] {
     display: block;
     text-align: left;
     background: var(--surface-2);
@@ -938,8 +1021,20 @@ dialog.modal.wide {
     color: var(--ink);
   }
 
-  table.ptable.stack td[data-label="Name"]::before {
+  table.ptable.stack td[data-label="Name"]::before,
+  table.ptable.stack td[data-label="Draw"]::before {
     content: none;
+  }
+
+  /* Stacked rows are cards, so the won highlight goes on the card. The cells
+     above are forced transparent, which would otherwise erase it. */
+  table.ptable.stack tbody tr.won-row {
+    background: var(--good-soft);
+    border-color: #b9dfd1;
+  }
+
+  table.ptable.stack tbody tr.won-row:nth-child(n) td[data-label="Draw"] {
+    background: transparent;
   }
 
   table.ptable.stack td:last-child {
