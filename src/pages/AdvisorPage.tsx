@@ -68,6 +68,14 @@ export function AdvisorPage() {
       .sort((a, b) => a.drawMonth.localeCompare(b.drawMonth))[0] ?? null;
   const nextGold = nextDraw("gold");
 
+  // Passes across the book sitting in a closed draw with no result recorded. In
+  // the days after a month turns this is why the blue column has collapsed, and
+  // a consultant should not have to open five statements to find that out.
+  const awaiting = clients.reduce((n, row) => n + row.awaiting, 0);
+  const awaitingMonths = draws
+    .filter((d) => !d.isDrawn && d.drawMonth < drawMonth)
+    .map((d) => monthName(d.drawMonth));
+
   return (
     <div className="page">
       <header className="page-head">
@@ -114,12 +122,23 @@ export function AdvisorPage() {
           </span>
         )}
         <span className="note">
-          Blue passes enter the {monthName(drawMonth)} draw and are used up by it.{" "}
+          The counts below are this draw only. Blue passes enter the draw for the
+          month they were earned and are used up by it — they are not carried
+          forward.{" "}
           {nextGold
             ? `Gold passes are held for the ${monthAndYear(nextGold.drawMonth)} draw.`
             : "Gold passes are held for the campaign draw."}{" "}
           Activity recorded after this date counts toward the following draw.
         </span>
+        {awaiting > 0 && (
+          <span className="pending-note">
+            {awaiting} {awaiting === 1 ? "pass" : "passes"} across your clients{" "}
+            {awaiting === 1 ? "is" : "are"} in the{" "}
+            {awaitingMonths.length > 0 ? `${awaitingMonths.join(" and ")} ` : "previous "}
+            draw, awaiting {awaitingMonths.length > 1 ? "results" : "a result"}.
+            They are not counted above. Open a client to see theirs.
+          </span>
+        )}
       </div>
 
       <div className="tablewrap card" style={{ boxShadow: "none" }}>

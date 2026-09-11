@@ -1,6 +1,7 @@
 import { supabase } from "../lib/supabase";
 import type { UploadPreview } from "../lib/ingest";
-import { drawnKeys, livePasses } from "../lib/passes";
+import { isOncePerClient } from "../lib/campaignRules";
+import { awaitingPasses, livePasses, passView } from "../lib/passes";
 import { shortenName } from "../lib/format";
 import type {
   Activity,
@@ -137,6 +138,9 @@ const toActivity = (r: ChallengeTypeRow, campaignId: string): Activity => ({
   // (3 Passes)" rather than "(3 Passes Per …)".
   unitLabel: r.unit_noun?.trim() ? r.unit_noun.trim() : null,
   sortOrder: r.sort_order ?? 0,
+  // No column for this on `challenge_types`, so it comes from the campaign terms
+  // in `src/lib/campaignRules.ts`.
+  oncePerClient: isOncePerClient(r.code),
 });
 
 const toClient = (r: ClientRow): ClientRecord => ({
@@ -353,7 +357,7 @@ export const supabaseApi: PortalApi = {
 
     const drawMonths = new Map(draws.map((d) => [d.id, d.drawMonth]));
     const events = (ledgerRows as LedgerRow[]).map((r) => toPassEvent(r, drawMonths));
-    const drawn = drawnKeys(draws);
+    const view = passView(campaign, draws);
 
     // A prize only counts once its draw has been run, so a result entered ahead
     // of the draw does not put a Winner badge on the table early.
@@ -369,14 +373,19 @@ export const supabaseApi: PortalApi = {
         const mine = events.filter((e) => e.clientId === client.id);
         return {
           client,
-          gold: livePasses(mine, "gold", activities, campaign, drawn),
-          blue: livePasses(mine, "blue", activities, campaign, drawn),
+          gold: livePasses(mine, "gold", activities, view),
+          blue: livePasses(mine, "blue", activities, view),
+          awaiting:
+            awaitingPasses(mine, "gold", activities, view) +
+            awaitingPasses(mine, "blue", activities, view),
           won: winners.has(client.id),
           hasAny: mine.length > 0,
         };
       })
       .filter((r) => r.hasAny)
-      .map(({ client, gold, blue, won }) => ({ client, gold, blue, won }))
+      .map(({ client, gold, blue, awaiting, won }) => ({
+        client, gold, blue, awaiting, won,
+      }))
       .sort((a, b) => b.gold + b.blue - (a.gold + a.blue));
   },
 

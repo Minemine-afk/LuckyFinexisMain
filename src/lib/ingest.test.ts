@@ -1,13 +1,21 @@
 import { describe, expect, it } from "vitest";
 import * as seed from "../data/mock";
 import { parseCsv } from "./csv";
-import { buildPreview, missingHeaders, naturalKey, toPassEvents, type IngestContext } from "./ingest";
+import {
+  buildPreview,
+  claimKey,
+  missingHeaders,
+  naturalKey,
+  toPassEvents,
+  type IngestContext,
+} from "./ingest";
 
-const ctx = (existing: string[] = []): IngestContext => ({
+const ctx = (existing: string[] = [], claimed: string[] = []): IngestContext => ({
   campaignId: seed.campaign.id,
   activities: seed.activities,
   clients: seed.clients,
   existingKeys: new Set(existing),
+  claimed: new Set(claimed),
 });
 
 const preview = (csv: string, context = ctx()) => {
@@ -148,5 +156,67 @@ describe("committing a preview", () => {
     expect(events[0].reference).toBe("Boyle, Charles");
     // ...even though the key used to spot a duplicate is case-folded.
     expect(p.rows[0].naturalKey).toContain("boyle, charles");
+  });
+});
+
+describe("once-per-client activities", () => {
+  it("takes only the first of two downloads in the same file", () => {
+    const p = preview(
+      `${HEAD}\n` +
+        `C-1001,download_finconnect,1,2026-09-03,install\n` +
+        `C-1001,download_finconnect,1,2026-09-18,reinstall`,
+    );
+    expect(p.rows[0].outcome).toBe("insert");
+    expect(p.rows[1].outcome).toBe("duplicate");
+    expect(p.rows[1].reason).toMatch(/once per client/);
+  });
+
+  it("turns one away when the client already has it in the ledger", () => {
+    const context = ctx([], [claimKey("C-1001", "download_finconnect")]);
+    const p = preview(`${HEAD}\nC-1001,download_finconnect,1,2026-09-18,reinstall`, context);
+    expect(p.rows[0].outcome).toBe("duplicate");
+    expect(toPassEvents(p, context, "t")).toHaveLength(0);
+  });
+
+  it("does not let one client's claim block another's", () => {
+    const context = ctx([], [claimKey("C-1001", "download_finconnect")]);
+    const p = preview(`${HEAD}\nC-1002,download_finconnect,1,2026-09-18,install`, context);
+    expect(p.rows[0].outcome).toBe("insert");
+  });
+
+  it("caps the testimonial too, and it is still worth 3 passes", () => {
+    const p = preview(
+      `${HEAD}\n` +
+        `C-1001,submit_testimonial,1,2026-09-01,first\n` +
+        `C-1001,submit_testimonial,1,2026-09-22,again`,
+    );
+    expect(p.rows[0].outcome).toBe("insert");
+    expect(p.rows[0].passes).toBe(3);
+    expect(p.rows[1].outcome).toBe("duplicate");
+  });
+
+  it("leaves repeatable activities alone", () => {
+    const p = preview(
+      `${HEAD}\n` +
+        `C-1001,attend_client_event,1,2026-09-03,Briefing\n` +
+        `C-1001,attend_client_event,1,2026-09-18,Clinic`,
+    );
+    expect(p.rows.map((r) => r.outcome)).toEqual(["insert", "insert"]);
+  });
+
+  it("prefers the more precise reason when the very same row is re-uploaded", () => {
+    const key = naturalKey(seed.campaign.id, "C-1001", "download_finconnect", "2026-09-03", "install");
+    const context = ctx([key], [claimKey("C-1001", "download_finconnect")]);
+    const p = preview(`${HEAD}\nC-1001,download_finconnect,1,2026-09-03,install`, context);
+    expect(p.rows[0].reason).toBe("Already in the ledger");
+  });
+
+  it("does not let a voided row hold the slot", () => {
+    const p = preview(
+      `${HEAD},status\n` +
+        `C-1001,download_finconnect,1,2026-09-03,install,void\n` +
+        `C-1001,download_finconnect,1,2026-09-18,reinstall,valid`,
+    );
+    expect(p.rows[1].outcome).toBe("insert");
   });
 });

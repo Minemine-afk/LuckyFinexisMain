@@ -1,5 +1,6 @@
 import type {
   Activity,
+  Campaign,
   Draw,
   DrawMonth,
   DrawSchedule,
@@ -10,19 +11,30 @@ import type {
 } from "./types";
 
 /*
- * The campaign rule, in one sentence: a pass is spent by the draw it enters,
- * won or not.
+ * The campaign rule, in one sentence: a pass belongs to one ballot, and is used
+ * up by it.
  *
- * Which draw a pass enters depends on the schedule for its type, per
- * `DrawSchedule` in types.ts:
- *   `monthly`      — the draw for the month the pass was earned.
+ * Which ballot depends on the schedule for its type, per `DrawSchedule`:
+ *   `monthly`      — the draw for the month the pass was earned. It is in that
+ *                    ballot and no other; it is never carried forward.
  *   `campaign_end` — one draw at campaign close; passes accumulate until then.
  *
- * Spending is *derived*, never written: a pass is spent once its draw is marked
- * drawn. There is no job to run, no ledger rewrite when a draw happens, and no
- * window in which a missed job leaves last month's passes still counting. The
- * one stored form — `consumedByDrawId` on the event — is still honoured, so an
- * administrator can retire an individual pass by hand.
+ * A valid pass is therefore in exactly one of four states, and everything on
+ * screen derives from `passState` below:
+ *
+ *   live       its ballot is the one now collecting        counted in the total
+ *   upcoming   deliberately deferred to a later ballot     not counted yet
+ *   awaiting   its ballot closed, the draw is not recorded "Awaiting result"
+ *   drawn      its ballot has been run                     won, or unsuccessful
+ *
+ * The distinction between `live` and `awaiting` is the one that earns its keep.
+ * September's draw is run in October, so for a few days a client holds both
+ * September's closed ballot and October's open one. Adding them into a single
+ * "Blue Passes" number would show two ballots as one.
+ *
+ * None of this is stored. Nothing is written when a draw happens beyond
+ * `draws.is_drawn`, so there is no scheduled job to miss — which matters,
+ * because Pages Functions have no cron triggers.
  */
 
 /** The campaign settings the pass arithmetic depends on. */
@@ -30,6 +42,18 @@ export interface CampaignRules {
   drawSchedule: Record<PassType, DrawSchedule>;
   /** ISO date the campaign closes; the month the campaign-end draw runs in. */
   endsOn: string;
+}
+
+/**
+ * Everything needed to place a pass, gathered once per page rather than threaded
+ * through as four more arguments at every call site.
+ */
+export interface PassView {
+  rules: CampaignRules;
+  /** `drawKey` of every draw already run. */
+  drawn: Set<string>;
+  /** The ballot now collecting. */
+  currentMonth: DrawMonth;
 }
 
 /** Identifies a draw by what it draws, not by row id: "blue|2026-09". */
@@ -44,8 +68,8 @@ export function drawMonthOf(earnedOn: string): DrawMonth {
   return earnedOn.slice(0, 7);
 }
 
-/** The draw this pass goes into — the only one it will ever go into. */
-export function drawEnteredBy(
+/** The ballot this pass is in — the only one it will ever be in. */
+export function ballotMonth(
   event: PassEvent,
   passType: PassType,
   rules: CampaignRules,
@@ -56,34 +80,13 @@ export function drawEnteredBy(
 }
 
 /**
- * The draws that have actually been run, as keys. Anything whose draw is in
- * this set has been spent by it.
+ * The draws that have actually been run, as keys. A pass whose ballot is in this
+ * set has been used up by it.
  */
 export function drawnKeys(draws: Draw[]): Set<string> {
   return new Set(
     draws.filter((d) => d.isDrawn).map((d) => drawKey(d.passType, d.drawMonth)),
   );
-}
-
-/** Spent: its draw has run, or an administrator retired it individually. */
-export function isSpent(
-  event: PassEvent,
-  passType: PassType,
-  rules: CampaignRules,
-  drawn: Set<string>,
-): boolean {
-  if (event.consumedByDrawId !== null) return true;
-  return drawn.has(drawKey(passType, drawEnteredBy(event, passType, rules)));
-}
-
-/** Live: confirmed, and still waiting on its draw. This is the headline number. */
-export function isLive(
-  event: PassEvent,
-  passType: PassType,
-  rules: CampaignRules,
-  drawn: Set<string>,
-): boolean {
-  return event.status === "valid" && !isSpent(event, passType, rules, drawn);
 }
 
 /**
@@ -103,6 +106,107 @@ export function currentDrawMonth(
   return month;
 }
 
+/** Gather the campaign settings, the draws that have run, and today's ballot. */
+export function passView(
+  campaign: Campaign,
+  draws: Draw[],
+  now: Date = new Date(),
+): PassView {
+  return {
+    rules: { drawSchedule: campaign.drawSchedule, endsOn: campaign.endsOn },
+    drawn: drawnKeys(draws),
+    currentMonth: currentDrawMonth(campaign, now),
+  };
+}
+
+export type PassState = "live" | "upcoming" | "awaiting" | "drawn";
+
+/**
+ * Where a confirmed pass stands. The single place the four states are decided.
+ *
+ * `drawn` covers both winning and losing: for the arithmetic they are the same
+ * thing — the pass is gone. Which of the two it was needs the client's prizes,
+ * so that split happens in `buildDrawHistory`, where they are to hand.
+ */
+export function passState(
+  event: PassEvent,
+  passType: PassType,
+  view: PassView,
+): PassState {
+  // An administrator retiring one pass by hand, which no draw explains.
+  if (event.consumedByDrawId !== null) return "drawn";
+
+  const ballot = ballotMonth(event, passType, view.rules);
+  if (view.drawn.has(drawKey(passType, ballot))) return "drawn";
+
+  // A monthly pass is live only while its own month is the one collecting. A
+  // campaign-end pass has one ballot for the whole campaign, so it stays live
+  // until that draw runs — which is what lets gold accumulate.
+  if (view.rules.drawSchedule[passType] === "monthly") {
+    if (ballot < view.currentMonth) return "awaiting";
+    if (ballot > view.currentMonth) return "upcoming";
+  }
+  return "live";
+}
+
+/** In the ballot now collecting. This is the headline number. */
+export const isLive = (
+  event: PassEvent,
+  passType: PassType,
+  view: PassView,
+): boolean => event.status === "valid" && passState(event, passType, view) === "live";
+
+/**
+ * Apply the once-per-client cap.
+ *
+ * **Expects one client's events.** The cap is per client per activity, and this
+ * function has no client id to group by — every caller already holds a single
+ * client's ledger.
+ *
+ * Of the non-void events for a once-only activity, the earliest survives and is
+ * capped to one unit; the rest are dropped silently. Void rows never hold the
+ * slot — a cancelled testimonial should not block the real one — and are passed
+ * through so they still report as withdrawn.
+ */
+export function eligibleEvents(
+  activities: Activity[],
+  events: PassEvent[],
+): PassEvent[] {
+  const byId = new Map(activities.map((a) => [a.id, a]));
+  const claimed = new Set<string>();
+
+  // Earliest first, so it is the *first* download that counts.
+  const ordered = [...events].sort(
+    (a, b) => a.earnedOn.localeCompare(b.earnedOn) || a.id.localeCompare(b.id),
+  );
+
+  const kept: PassEvent[] = [];
+  for (const event of ordered) {
+    const activity = byId.get(event.activityId);
+    if (!activity?.oncePerClient || event.status === "void") {
+      kept.push(event);
+      continue;
+    }
+    if (claimed.has(event.activityId)) continue;
+    claimed.add(event.activityId);
+    kept.push(capToOneUnit(event));
+  }
+  return kept;
+}
+
+/**
+ * One unit's worth of a row that claims more.
+ *
+ * The rate comes from the row itself rather than today's rate card, for the same
+ * reason `passes` is stored rather than derived: changing a campaign rule next
+ * month must not rewrite last month's ledger. A testimonial row reading
+ * `units: 2, passes: 6` caps to 3 passes, not to 1.
+ */
+const capToOneUnit = (event: PassEvent): PassEvent => {
+  if (event.units <= 1) return event;
+  return { ...event, units: 1, passes: Math.round(event.passes / event.units) };
+};
+
 /** Index of activity id → pass type, so events can be grouped without a join. */
 const typeOf = (activities: Activity[]): Map<string, PassType> =>
   new Map(activities.map((a) => [a.id, a.passType]));
@@ -117,8 +221,12 @@ export interface ActivityRow {
   pending: number;
   /** Clawed back, shown only when non-zero. */
   voided: number;
-  /** Already entered a draw that has run, and so used up. */
-  spent: number;
+  /** In a closed ballot whose draw has not been recorded yet. */
+  awaiting: number;
+  /** Deliberately deferred to a later ballot. */
+  upcoming: number;
+  /** In a ballot that has been run, won or not. */
+  drawn: number;
 }
 
 export interface PassBlock {
@@ -126,7 +234,9 @@ export interface PassBlock {
   total: number;
   pending: number;
   voided: number;
-  spent: number;
+  awaiting: number;
+  upcoming: number;
+  drawn: number;
   rows: ActivityRow[];
 }
 
@@ -139,9 +249,10 @@ export interface PassBlock {
 export function buildPassBlocks(
   activities: Activity[],
   events: PassEvent[],
-  rules: CampaignRules,
-  drawn: Set<string>,
+  view: PassView,
 ): PassBlock[] {
+  const eligible = eligibleEvents(activities, events);
+
   const byType = new Map<PassType, Activity[]>();
   for (const a of [...activities].sort((x, y) => x.sortOrder - y.sortOrder)) {
     const list = byType.get(a.passType) ?? [];
@@ -154,8 +265,11 @@ export function buildPassBlocks(
     .filter((t) => byType.has(t))
     .map((passType) => {
       const rows = (byType.get(passType) ?? []).map((activity): ActivityRow => {
-        const mine = events.filter((e) => e.activityId === activity.id);
-        const live = mine.filter((e) => isLive(e, passType, rules, drawn));
+        const mine = eligible.filter((e) => e.activityId === activity.id);
+        const confirmed = mine.filter((e) => e.status === "valid");
+        const inState = (state: PassState) =>
+          confirmed.filter((e) => passState(e, passType, view) === state);
+        const live = inState("live");
 
         return {
           activity,
@@ -163,11 +277,9 @@ export function buildPassBlocks(
           units: live.reduce((n, e) => n + e.units, 0),
           pending: sumPasses(mine.filter((e) => e.status === "pending")),
           voided: sumPasses(mine.filter((e) => e.status === "void")),
-          spent: sumPasses(
-            mine.filter(
-              (e) => e.status === "valid" && isSpent(e, passType, rules, drawn),
-            ),
-          ),
+          awaiting: sumPasses(inState("awaiting")),
+          upcoming: sumPasses(inState("upcoming")),
+          drawn: sumPasses(inState("drawn")),
         };
       });
 
@@ -179,90 +291,85 @@ export function buildPassBlocks(
         total: sum((r) => r.passes),
         pending: sum((r) => r.pending),
         voided: sum((r) => r.voided),
-        spent: sum((r) => r.spent),
+        awaiting: sum((r) => r.awaiting),
+        upcoming: sum((r) => r.upcoming),
+        drawn: sum((r) => r.drawn),
         rows,
       };
     });
 }
 
-/**
- * Live passes of one type — what the consultant's table shows, and what the
- * next draw of that type would actually be run against.
- */
+/** Passes of one type in the ballot now collecting — the consultant's column. */
 export function livePasses(
   events: PassEvent[],
   passType: PassType,
   activities: Activity[],
-  rules: CampaignRules,
-  drawn: Set<string>,
+  view: PassView,
 ): number {
   const types = typeOf(activities);
   return sumPasses(
-    events.filter(
-      (e) =>
-        types.get(e.activityId) === passType && isLive(e, passType, rules, drawn),
+    eligibleEvents(activities, events).filter(
+      (e) => types.get(e.activityId) === passType && isLive(e, passType, view),
     ),
   );
 }
 
-/** Passes of one type already used up by a draw that has run. */
-export function spentPasses(
+/** Passes of one type sitting in a closed ballot whose draw has not been run. */
+export function awaitingPasses(
   events: PassEvent[],
   passType: PassType,
   activities: Activity[],
-  rules: CampaignRules,
-  drawn: Set<string>,
+  view: PassView,
 ): number {
   const types = typeOf(activities);
   return sumPasses(
-    events.filter(
+    eligibleEvents(activities, events).filter(
       (e) =>
         types.get(e.activityId) === passType &&
         e.status === "valid" &&
-        isSpent(e, passType, rules, drawn),
+        passState(e, passType, view) === "awaiting",
     ),
   );
 }
 
-/** One row of the Previous Passes history: a draw this client had passes in. */
+/** One row of the Previous Passes history: a ballot this client had passes in. */
 export interface DrawEntry {
   passType: PassType;
   drawMonth: DrawMonth;
-  /** Passes this client entered into that draw. */
+  /** Passes this client has in that ballot. */
   passes: number;
   /** Where they came from — "5 referrals", "2 events" — for the detail line. */
   parts: string[];
-  /** `won` and `spent` are past draws; `open` is one still to run. */
-  state: "won" | "spent" | "open";
-  /** The prize, when this draw was won. */
+  state: "won" | "unsuccessful" | "awaiting" | "open";
+  /** The prize, when this ballot was won. */
   prize: string | null;
 }
 
 /**
- * The Previous Passes view: every draw this client's passes went into, newest
- * first, with what came of it.
+ * The Previous Passes view: every ballot this client's passes are or were in,
+ * newest first, with what came of it.
  *
- * Draws still to run are included as `open` — a client looking at "0 live blue
- * passes" needs the December gold draw in the same list to see that 21 gold are
- * still in play, not gone.
+ * Ballots still to run are included as `open` — a client looking at "0 live blue
+ * passes" needs the gold draw in the same list to see that 21 gold are still in
+ * play, not gone — and closed ones with no result yet as `awaiting`, which is
+ * the honest answer to "so what happened to September?".
  */
 export function buildDrawHistory(
   activities: Activity[],
   events: PassEvent[],
-  rules: CampaignRules,
-  drawn: Set<string>,
+  view: PassView,
   winners: DrawWinner[],
 ): DrawEntry[] {
   const types = typeOf(activities);
   const byId = new Map(activities.map((a) => [a.id, a]));
 
-  // Group confirmed passes by the draw they entered.
+  // Group confirmed passes by the ballot they are in.
   const groups = new Map<string, PassEvent[]>();
-  for (const e of events) {
+  for (const e of eligibleEvents(activities, events)) {
     if (e.status !== "valid") continue;
     const passType = types.get(e.activityId);
     if (!passType) continue;
-    const key = drawKey(passType, drawEnteredBy(e, passType, rules));
+    const key = drawKey(passType, ballotMonth(e, passType, view.rules));
     const list = groups.get(key) ?? [];
     list.push(e);
     groups.set(key, list);
@@ -275,9 +382,14 @@ export function buildDrawHistory(
   return [...groups.entries()]
     .map(([key, group]): DrawEntry => {
       const [passType, drawMonth] = key.split("|") as [PassType, DrawMonth];
-      const spent =
-        drawn.has(key) || group.every((e) => e.consumedByDrawId !== null);
       const prize = wonAt.get(key) ?? null;
+
+      // Every pass in a group shares a ballot, so the first settles the state.
+      const state = passState(group[0], passType, view);
+      const outcome: DrawEntry["state"] =
+        state === "drawn" ? (prize !== null ? "won" : "unsuccessful")
+        : state === "awaiting" ? "awaiting"
+        : "open";
 
       // Collapse to "5 referrals, 2 events" rather than listing every row: the
       // per-activity detail already lives in the tables above.
@@ -289,8 +401,12 @@ export function buildDrawHistory(
       }
       const parts = [...units.entries()].map(([id, n]) => {
         const a = byId.get(id)!;
-        const noun = a.unitLabel ? a.unitLabel.toLowerCase() : a.label.toLowerCase();
-        return `${n} ${noun}${n === 1 || !a.unitLabel ? "" : "s"}`;
+        // An activity counted per something reads "5 referrals". One that is not
+        // counted per anything reads as its own name — "1 submit a testimonial"
+        // is not English.
+        if (!a.unitLabel) return n > 1 ? `${a.label} ×${n}` : a.label;
+        const noun = a.unitLabel.toLowerCase();
+        return `${n} ${noun}${n === 1 ? "" : "s"}`;
       });
 
       return {
@@ -298,12 +414,13 @@ export function buildDrawHistory(
         drawMonth,
         passes: sumPasses(group),
         parts,
-        state: prize !== null ? "won" : spent ? "spent" : "open",
+        state: outcome,
         prize,
       };
     })
     .sort(
-      (a, b) => b.drawMonth.localeCompare(a.drawMonth) || a.passType.localeCompare(b.passType),
+      (a, b) =>
+        b.drawMonth.localeCompare(a.drawMonth) || a.passType.localeCompare(b.passType),
     );
 }
 

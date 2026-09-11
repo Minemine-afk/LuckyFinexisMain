@@ -1,13 +1,14 @@
 import { parseCsv } from "../lib/csv";
 import {
   buildPreview,
+  claimKey,
   missingHeaders,
   naturalKey,
   toPassEvents,
   type IngestContext,
   type UploadPreview,
 } from "../lib/ingest";
-import { drawnKeys, livePasses } from "../lib/passes";
+import { awaitingPasses, livePasses, passView } from "../lib/passes";
 import type {
   Activity,
   AdvisorClientRow,
@@ -95,6 +96,18 @@ const ingestContext = (campaignId: string): IngestContext => ({
   activities: seed.activities,
   clients: seed.clients,
   existingKeys: new Set(ledger.map(keyOf)),
+  // A voided row does not hold the slot: a cancelled testimonial should not
+  // block the real one from being loaded later.
+  claimed: new Set(
+    ledger
+      .filter((e) => e.status !== "void")
+      .filter((e) => seed.activities.find((a) => a.id === e.activityId)?.oncePerClient)
+      .map((e) => {
+        const client = seed.clients.find((c) => c.id === e.clientId);
+        const activity = seed.activities.find((a) => a.id === e.activityId);
+        return claimKey(client?.externalRef ?? "", activity?.code ?? "");
+      }),
+  ),
 });
 
 export const mockApi: PortalApi = {
@@ -128,11 +141,11 @@ export const mockApi: PortalApi = {
 
   async getAdvisorClients(advisorId, campaignId): Promise<AdvisorClientRow[]> {
     const mine = seed.clients.filter((c) => c.advisorId === advisorId);
-    const drawn = drawnKeys(seed.draws.filter((d) => d.campaignId === campaignId));
+    const draws = seed.draws.filter((d) => d.campaignId === campaignId);
+    const view = passView(seed.campaign, draws);
+    const drawnIds = new Set(draws.filter((d) => d.isDrawn).map((d) => d.id));
     const winnerIds = new Set(
-      seed.drawWinners
-        .filter((w) => drawn.has(`${w.passType}|${w.drawMonth}`))
-        .map((w) => w.clientId),
+      seed.drawWinners.filter((w) => drawnIds.has(w.drawId)).map((w) => w.clientId),
     );
     const rows = mine
       .map((client) => {
@@ -141,8 +154,11 @@ export const mockApi: PortalApi = {
         );
         return {
           client,
-          gold: livePasses(events, "gold", seed.activities, seed.campaign, drawn),
-          blue: livePasses(events, "blue", seed.activities, seed.campaign, drawn),
+          gold: livePasses(events, "gold", seed.activities, view),
+          blue: livePasses(events, "blue", seed.activities, view),
+          awaiting:
+            awaitingPasses(events, "gold", seed.activities, view) +
+            awaitingPasses(events, "blue", seed.activities, view),
           won: winnerIds.has(client.id),
           hasAny: events.length > 0,
         };
@@ -150,7 +166,9 @@ export const mockApi: PortalApi = {
       // A client with nothing in the ledger is not in the campaign yet, so the
       // advisor's table stays a list of people who have actually earned something.
       .filter((r) => r.hasAny)
-      .map(({ client, gold, blue, won }) => ({ client, gold, blue, won }));
+      .map(({ client, gold, blue, awaiting, won }) => ({
+        client, gold, blue, awaiting, won,
+      }));
 
     return delay(rows.sort((a, b) => b.gold + b.blue - (a.gold + a.blue)));
   },

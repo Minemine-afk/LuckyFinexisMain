@@ -1,17 +1,18 @@
 import { useState } from "react";
 import { activityRule, monthAndYear, monthName, passTypeLabel, shortDate } from "../lib/format";
-import { buildDrawHistory, buildPassBlocks, drawnKeys } from "../lib/passes";
+import { buildDrawHistory, buildPassBlocks, passView } from "../lib/passes";
 import type { Activity, Campaign, ClientStatement, Draw } from "../lib/types";
 
 /**
  * The client's boarding pass statement: one table per pass type listing every
  * qualifying activity and what it has earned, then any prizes won.
  *
- * The counts are live passes only — a pass is used up by the draw it enters, so
- * anything already drawn for has gone. That is the number most likely to
- * surprise a client, so the passes they have spent are named directly beneath
- * the table rather than left to be discovered, and Previous Passes shows where
- * every one of them went.
+ * The totals are the ballot now collecting, and nothing else. A pass belongs to
+ * the draw for the month it was earned and is used up by it, so last month's
+ * passes are not in this month's number — whether or not that draw has been run
+ * yet. That is the figure most likely to surprise a client, so everything
+ * missing from it is named directly beneath the table rather than left to be
+ * discovered, and Previous Passes accounts for every pass month by month.
  */
 export function ClientStatementPanel({
   campaign,
@@ -28,16 +29,10 @@ export function ClientStatementPanel({
 }) {
   const [historyOpen, setHistoryOpen] = useState(false);
 
-  const drawn = drawnKeys(draws);
-  const blocks = buildPassBlocks(activities, statement.events, campaign, drawn);
+  const view = passView(campaign, draws);
+  const blocks = buildPassBlocks(activities, statement.events, view);
   const { winners } = statement;
-  const history = buildDrawHistory(
-    activities,
-    statement.events,
-    campaign,
-    drawn,
-    winners,
-  );
+  const history = buildDrawHistory(activities, statement.events, view, winners);
 
   return (
     <div className="statement">
@@ -82,13 +77,30 @@ export function ClientStatementPanel({
               reads exactly like the mockup. Spent passes are named rather than
               quietly dropped — a client who remembers earning them deserves to
               see where they went. */}
-          {(block.pending > 0 || block.voided > 0 || block.spent > 0) && (
+          {(block.pending > 0 || block.voided > 0 || block.drawn > 0 ||
+            block.awaiting > 0 || block.upcoming > 0) && (
             <p className="block-note">
-              {block.spent > 0 && (
+              {block.drawn > 0 && (
                 <>
-                  {block.spent} {passTypeLabel(block.passType).toLowerCase()}{" "}
-                  {block.spent === 1 ? "pass has" : "passes have"} already been
+                  {block.drawn} {passTypeLabel(block.passType).toLowerCase()}{" "}
+                  {block.drawn === 1 ? "pass has" : "passes have"} already been
                   entered into a draw and used up.{" "}
+                </>
+              )}
+              {/* The month is deliberately not named here: awaiting passes can
+                  span more than one closed draw. Previous Passes has them
+                  month by month. */}
+              {block.awaiting > 0 && (
+                <>
+                  {block.awaiting} {passTypeLabel(block.passType).toLowerCase()}{" "}
+                  {block.awaiting === 1 ? "pass is" : "passes are"} in a closed draw,
+                  awaiting the result.{" "}
+                </>
+              )}
+              {block.upcoming > 0 && (
+                <>
+                  {block.upcoming} {block.upcoming === 1 ? "pass enters" : "passes enter"} a
+                  later draw.{" "}
                 </>
               )}
               {block.pending > 0 && (
@@ -194,11 +206,14 @@ export function ClientStatementPanel({
                         {entry.state === "won" && (
                           <span className="outcome won">Won — {entry.prize}</span>
                         )}
-                        {entry.state === "spent" && (
-                          <span className="outcome spent">Not drawn — passes used</span>
+                        {entry.state === "unsuccessful" && (
+                          <span className="outcome unsuccessful">Unsuccessful</span>
+                        )}
+                        {entry.state === "awaiting" && (
+                          <span className="outcome awaiting">Awaiting result</span>
                         )}
                         {entry.state === "open" && (
-                          <span className="outcome open">Still in the draw</span>
+                          <span className="outcome open">In the draw</span>
                         )}
                       </td>
                     </tr>
@@ -206,9 +221,10 @@ export function ClientStatementPanel({
                 </tbody>
               </table>
               <p className="block-note">
-                Every pass entered into a draw is used up by it, whether or not it
-                wins. Passes marked <b>still in the draw</b> are the ones counted
-                in the totals above.
+                Passes go into the draw for the month they were earned and are used
+                up by it, win or not — they are never carried into the next month.
+                Only the ones marked <b>in the draw</b> are counted in the totals
+                above.
               </p>
             </div>
           )}

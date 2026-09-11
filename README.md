@@ -10,7 +10,7 @@ whole portal can be clicked through before a Supabase project exists.
 ```bash
 npm install
 npm run dev          # http://localhost:5173, demo data, no backend needed
-npm test             # 50 tests over the pass arithmetic, CSV parser and ingest rules
+npm test             # 65 tests over the pass arithmetic, CSV parser and ingest rules
 npm run build        # tsc -b && vite build -> dist/
 ```
 
@@ -56,29 +56,58 @@ countable — a policy still inside its free-look window, a referral that has no
 Only valid passes appear in a total; pending and voided ones are summarised beneath the table
 so a client can see why a number is lower than they expected.
 
-**A pass is spent by the draw it enters, won or not.** Not spent on winning — spent on
-entering. Everyone who put passes into August's draw comes out of it with those passes gone,
-and the totals on screen are what is still live. **Previous Passes** on the statement shows
-month by month which passes went into which draw and what came of each one.
+**A pass belongs to one ballot, and is used up by it.** Not used up on winning — used up on
+entering. Everyone who put passes into August's draw comes out of it with those passes gone.
+Entry is automatic: anything in the ledger for a month is in that month's ballot.
 
-**Which draw a pass enters depends on its type**, because gold and blue are drawn on different
+**Which ballot depends on the pass type**, because gold and blue are drawn on different
 schedules. `drawSchedule` in `getCampaign` holds this:
 
 | Pass type | Schedule | Effect |
 |---|---|---|
-| Blue | `monthly` | Enters the draw for the month it was earned, and is used up by it. |
+| Blue | `monthly` | Enters the draw for the month it was earned. Never carried forward. |
 | Gold | `campaign_end` | Accumulates until the single draw at campaign close, then all of it goes at once. |
 
 If gold turns out to be drawn monthly too, that one value is the only thing that changes.
 
-**Spending is derived, never written.** A pass is spent once `draws.is_drawn` is true for the
-draw it entered, so recording a draw needs no writes to the ledger at all — which matters,
-because Cloudflare Pages Functions have no cron triggers and there is therefore no scheduled
-job to miss. `consumedByDrawId` on the ledger still retires an individual pass by hand, for
-administrative corrections.
+**A confirmed pass is therefore in one of four states**, decided in one place — `passState`
+in `src/lib/passes.ts` — and everything on screen derives from it:
+
+| State | Condition | Shown as |
+|---|---|---|
+| `live` | its ballot is the one now collecting | counted in the headline total |
+| `upcoming` | deferred to a later ballot via `draw_month` | "enters a later draw" |
+| `awaiting` | its ballot closed, the draw is not recorded yet | "Awaiting result" |
+| `drawn` | its ballot has been run | "Won — *prize*", or "Unsuccessful" |
+
+The split between `live` and `awaiting` is the one that earns its keep. September's draw is
+run *in* October, so for a few days a client holds both September's closed ballot and
+October's open one. Adding them into a single "Blue Passes" number would show two ballots as
+one, so the column is the ballot now collecting and nothing else — with the rest accounted
+for beneath the table and, month by month, behind **Previous Passes**.
+
+**None of this is stored.** A pass is used up once `draws.is_drawn` is true for its ballot,
+so recording a draw needs no writes to the ledger at all — which matters, because Cloudflare
+Pages Functions have no cron triggers and there is therefore no scheduled job to miss.
+`consumedByDrawId` on the ledger still retires an individual pass by hand, for administrative
+corrections.
 
 `draw_month` defaults to the month of `earned_on` and can be set later to defer a pass into a
 following draw, never earlier.
+
+**Some activities count once per client.** Downloading the app and submitting a testimonial
+happen once; further ledger rows for them are the same event re-exported, not a second award.
+`ONCE_PER_CLIENT` in `src/lib/campaignRules.ts` names them by activity code.
+
+The cap is applied **on read**, not only on import — the ledger is loaded into Supabase
+outside this portal, so duplicates already stored would otherwise keep counting. Of a
+client's non-void rows for such an activity the earliest survives, capped to **one unit**;
+the rest are ignored silently. It is a cap on units rather than passes, which is what keeps
+a capped testimonial worth its full 3 passes rather than 1. A voided row never holds the
+slot, so a cancelled testimonial does not block the real one.
+
+To move the list into the database: add a boolean column to `challenge_types`, read it in
+`toActivity`, and delete `campaignRules.ts`. Nothing else refers to those codes.
 
 ## The ledger, and why uploads are safe to repeat
 
@@ -89,6 +118,11 @@ A row is "already stored" when its client, activity, date and reference all matc
 entry. That is the natural key, and it is why re-uploading last month's export adds nothing
 rather than doubling everybody's passes. `reference` — a policy number, a referral name, an
 event name — is what separates two genuinely different events on the same day.
+
+For a once-per-client activity the date and reference are exactly what must *not* make a
+second one distinct, so those rows are matched on client and activity alone — against the
+ledger and against earlier rows in the same file, so one upload carrying two finConnect rows
+for a client lands only the first.
 
 Uploading is two steps on purpose. The file is validated and reported on first, and nothing is
 written until the counts are confirmed, so a mis-mapped column shows up as a page of rejected
@@ -165,12 +199,14 @@ Some judgement calls worth knowing about:
   "reversed" and similar is void; "pending", "provisional", "free-look" and similar are
   pending; everything else counts. Narrow `VOID_WORDS` / `PENDING_WORDS` if the column
   carries states those miss.
-- **Spending reads `draws.is_drawn` rather than a column on the ledger.** There is no
-  consumed column, and none is needed: a pass is spent by the draw it entered, so marking a
-  draw drawn is the whole of the write.
+- **Whether a pass is used up reads `draws.is_drawn`, not a column on the ledger.** There is
+  no consumed column, and none is needed: a pass is used up by the ballot it is in, so
+  marking a draw drawn is the whole of the write.
 - **`drawSchedule` is stated in code, not stored.** `campaigns` has no column for it yet, so
   `getCampaign` sets blue monthly and gold at campaign close. Move it to the table when a
   second campaign needs different terms.
+- **Once-per-client activities are stated in code too**, in `src/lib/campaignRules.ts`,
+  because `challenge_types` is a rate card with no column for it.
 - **Roles.** There is no profiles table: the `advisors` row is the source of truth, and an
   admin is marked by `app_metadata.role`, which only the service role can set. A sign-in
   matching neither is refused rather than defaulted.
@@ -244,8 +280,9 @@ This pass is the front end. Still to come, in rough order:
 3. **Admin: record a draw** — draws are run offline and the result recorded. The app reads
    `draws.is_drawn` and `prizes_won` correctly, but has no screen to set them: both are
    entered in Supabase for now. The screen is a short one — pick the winner, name the prize,
-   mark the draw drawn — and marking it drawn is what spends every pass entered into it, so
-   it needs saying plainly on the button.
+   mark the draw drawn — and marking it drawn is what uses up every pass entered into it, so
+   it needs saying plainly on the button. This is the most visible gap: until a draw is
+   recorded, everyone who entered it sits in `awaiting`, looking at passes with no outcome.
 4. **Admin: campaign artwork and winners** — the mockups have an admin uploading the campaign
    details image and publishing each month's winners. Both are read correctly by the
    consultant view; neither has an editor yet. Until artwork is uploaded, the details pop-up

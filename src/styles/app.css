@@ -147,6 +147,19 @@
   color: var(--ink-2);
 }
 
+/* Only appears in the gap between a month closing and its draw being recorded.
+   It is the explanation for a column of zeroes, so it is set apart from the
+   standing note rather than appended to it. */
+.cutoff .pending-note {
+  flex-basis: 100%;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--brand-line);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--warn);
+}
+
 /* Type colour on the statement's block headings, which sit on the white card
    rather than the blue bar, so the colour itself is legible there. */
 .block-title.gold-title {
@@ -481,8 +494,13 @@ table.ptable tbody tr:last-child td:last-child {
   font-weight: 600;
 }
 
-.outcome.spent {
+.outcome.unsuccessful {
   color: var(--ink-3);
+}
+
+.outcome.awaiting {
+  color: var(--warn);
+  font-weight: 500;
 }
 
 .outcome.open {

@@ -1,3 +1,4 @@
+import { isOncePerClient } from "../lib/campaignRules";
 import { drawMonthOf } from "../lib/passes";
 import type {
   Activity,
@@ -17,7 +18,8 @@ import type {
  * before a Supabase project exists.
  *
  * Between them the five clients cover every state the pass rules can produce:
- * live, spent by a draw that has run, won, pending confirmation, and voided.
+ * live, awaiting a result, won, unsuccessful, pending confirmation, voided, and
+ * a once-per-client activity claimed twice.
  *
  * Set VITE_USE_MOCK=false and the app talks to Supabase instead; nothing outside
  * `src/data/` knows the difference.
@@ -48,6 +50,7 @@ const dayIn = (delta: number, day: number): string =>
 
 const THIS_MONTH = monthsFromNow(0);
 const LAST_MONTH = monthsFromNow(-1);
+const FIRST_MONTH = monthsFromNow(-2);
 /** The month the campaign closes, and so the month the single gold draw runs. */
 const FINAL_MONTH = monthsFromNow(4);
 
@@ -61,7 +64,7 @@ export const campaign: Campaign = {
   id: CAMPAIGN_ID,
   name: "Around The World Client Campaign",
   slug: "around-the-world-2026",
-  startsOn: `${monthsFromNow(-1)}-01`,
+  startsOn: `${FIRST_MONTH}-01`,
   endsOn: endOfMonth(4),
   // In a real deployment this is a signed URL to the artwork an admin uploaded
   // to Supabase Storage. The demo ships an inline placeholder instead.
@@ -73,7 +76,8 @@ export const campaign: Campaign = {
   drawSchedule: { gold: "campaign_end", blue: "monthly" },
 };
 
-export const activities: Activity[] = [
+/** The rate card, as `challenge_types` holds it — without the once-only flag. */
+const rateCard: Omit<Activity, "oncePerClient">[] = [
   {
     id: "act-gold-purchase",
     campaignId: CAMPAIGN_ID,
@@ -146,6 +150,12 @@ export const activities: Activity[] = [
   },
 ];
 
+/** The flag comes from campaign terms, exactly as it does in `toActivity`. */
+export const activities: Activity[] = rateCard.map((a) => ({
+  ...a,
+  oncePerClient: isOncePerClient(a.code),
+}));
+
 export const advisors: Advisor[] = [
   { id: "adv-1", fcCode: "FC001", fullName: "Amy Santiago", email: "advisor@finexis.demo" },
   // Deliberately has no clients holding passes, so the blank-table state the
@@ -192,36 +202,41 @@ const ev = (
 };
 
 export const passEvents: PassEvent[] = [
-  // Jake Peralta — the worked example the mockups are built around. He put 50
-  // blue passes into last month's draw and won it, so those 50 are gone; this
-  // month he has started again from zero. His 21 gold are untouched, waiting on
-  // the single gold draw at campaign close.
-  ev("cli-1", "act-gold-purchase", 1, dayIn(-1, 4), "POL-88213"),
-  ev("cli-1", "act-blue-referral", 5, dayIn(-1, 3), "Referral batch"),
-  ev("cli-1", "act-blue-event", 2, dayIn(-1, 11), "Market outlook briefing"),
-  ev("cli-1", "act-blue-guest", 3, dayIn(-1, 11), "Market outlook briefing"),
+  // Jake Peralta — the worked example the mockups are built around, and the one
+  // client who shows all three blue states at once: 50 passes won the first
+  // month's draw, last month's 4 are waiting on a result, and this month's 7 are
+  // live. His 21 gold sit in the campaign-close ballot throughout.
+  ev("cli-1", "act-gold-purchase", 1, dayIn(-2, 4), "POL-88213"),
+  ev("cli-1", "act-blue-referral", 5, dayIn(-2, 3), "Referral batch"),
+  ev("cli-1", "act-blue-event", 2, dayIn(-2, 11), "Market outlook briefing"),
+  ev("cli-1", "act-blue-guest", 3, dayIn(-2, 11), "Market outlook briefing"),
+  ev("cli-1", "act-blue-referral", 2, dayIn(-1, 14), "Referral: C. Santiago"),
   ev("cli-1", "act-blue-referral", 1, dayIn(0, 6), "Referral: G. Linetti"),
   ev("cli-1", "act-blue-event", 1, dayIn(0, 9), "Retirement planning clinic"),
 
-  // Rosa Diaz — passes spent by a draw she did not win, which is the ordinary
+  // Rosa Diaz — passes used up by a draw she did not win, which is the ordinary
   // case and the one the statement has to explain gracefully.
-  ev("cli-2", "act-gold-purchase", 2, dayIn(-1, 8), "POL-88240 / POL-88241"),
-  ev("cli-2", "act-blue-referral", 2, dayIn(-1, 6), "Referral: A. Diaz"),
+  ev("cli-2", "act-gold-purchase", 2, dayIn(-2, 8), "POL-88240 / POL-88241"),
+  ev("cli-2", "act-blue-referral", 2, dayIn(-2, 6), "Referral: A. Diaz"),
   ev("cli-2", "act-blue-referral", 1, dayIn(0, 6), "Referral: M. Diaz"),
   ev("cli-2", "act-blue-event", 2, dayIn(0, 14), "Retirement planning clinic"),
 
-  // Terry Jeffords — won last month's draw on a small entry, showing that the
-  // number of passes is odds rather than entitlement.
-  ev("cli-3", "act-blue-referral", 2, dayIn(-1, 15), "Referral: S. Jeffords"),
-  ev("cli-3", "act-blue-event", 1, dayIn(-1, 19), "Mid-year market outlook"),
-  ev("cli-3", "act-blue-guest", 1, dayIn(-1, 19), "Guest: Sharon"),
+  // Terry Jeffords — won the first draw on a small entry, showing that passes are
+  // odds rather than entitlement. He also appears twice for both once-per-client
+  // activities: the export lists the app download and the testimonial again, and
+  // only the first of each counts.
+  ev("cli-3", "act-blue-referral", 2, dayIn(-2, 15), "Referral: S. Jeffords"),
+  ev("cli-3", "act-blue-event", 1, dayIn(-2, 19), "Mid-year market outlook"),
+  ev("cli-3", "act-blue-guest", 1, dayIn(-2, 19), "Guest: Sharon"),
   ev("cli-3", "act-blue-testimonial", 1, dayIn(0, 1), "Testimonial"),
+  ev("cli-3", "act-blue-testimonial", 1, dayIn(0, 22), "Testimonial (re-exported)"),
   ev("cli-3", "act-blue-finconnect", 1, dayIn(0, 3), "finConnect install"),
+  ev("cli-3", "act-blue-finconnect", 1, dayIn(0, 18), "finConnect reinstall"),
 
   // Gina Linetti — a gold case still inside its free-look window, so pending,
   // and a referral purchase clawed back when the policy was cancelled.
   ev("cli-4", "act-gold-purchase", 1, dayIn(0, 12), "POL-88301", "pending"),
-  ev("cli-4", "act-gold-referral-purchase", 1, dayIn(-1, 30), "POL-88266", "void", "Policy cancelled in free-look"),
+  ev("cli-4", "act-gold-referral-purchase", 1, dayIn(-2, 30), "POL-88266", "void", "Policy cancelled in free-look"),
   ev("cli-4", "act-blue-referral", 3, dayIn(0, 8), "Referral batch"),
   ev("cli-4", "act-blue-finconnect", 1, dayIn(-1, 29), "finConnect install"),
 
@@ -231,18 +246,22 @@ export const passEvents: PassEvent[] = [
 
 /**
  * Gold and blue are drawn on different schedules, so they are separate rows.
- * Only last month's blue draw has been run; this month's is still collecting,
- * and the gold draw waits for campaign close.
+ *
+ * Only the first month's blue draw has been run. Last month's is closed but not
+ * yet recorded — the real-world gap, where a client's passes are spent but the
+ * result is not out — this month's is still collecting, and the gold draw waits
+ * for campaign close.
  */
 export const draws: Draw[] = [
-  { id: "draw-blue-prev", campaignId: CAMPAIGN_ID, drawMonth: LAST_MONTH, passType: "blue", isDrawn: true, drawnAt: `${THIS_MONTH}-01` },
-  { id: "draw-blue-now", campaignId: CAMPAIGN_ID, drawMonth: THIS_MONTH, passType: "blue", isDrawn: false, drawnAt: null },
+  { id: "draw-blue-1", campaignId: CAMPAIGN_ID, drawMonth: FIRST_MONTH, passType: "blue", isDrawn: true, drawnAt: `${LAST_MONTH}-02` },
+  { id: "draw-blue-2", campaignId: CAMPAIGN_ID, drawMonth: LAST_MONTH, passType: "blue", isDrawn: false, drawnAt: null },
+  { id: "draw-blue-3", campaignId: CAMPAIGN_ID, drawMonth: THIS_MONTH, passType: "blue", isDrawn: false, drawnAt: null },
   { id: "draw-gold-final", campaignId: CAMPAIGN_ID, drawMonth: FINAL_MONTH, passType: "gold", isDrawn: false, drawnAt: null },
 ];
 
 export const drawWinners: DrawWinner[] = [
-  { id: "win-1", drawId: "draw-blue-prev", drawMonth: LAST_MONTH, clientId: "cli-1", displayName: "Jake P.", prize: "OSIM uJolly", passType: "blue" },
-  { id: "win-2", drawId: "draw-blue-prev", drawMonth: LAST_MONTH, clientId: "cli-3", displayName: "Terry J.", prize: "Dyson Airwrap", passType: "blue" },
+  { id: "win-1", drawId: "draw-blue-1", drawMonth: FIRST_MONTH, clientId: "cli-1", displayName: "Jake P.", prize: "OSIM uJolly", passType: "blue" },
+  { id: "win-2", drawId: "draw-blue-1", drawMonth: FIRST_MONTH, clientId: "cli-3", displayName: "Terry J.", prize: "Dyson Airwrap", passType: "blue" },
 ];
 
 export const demoViewers: Viewer[] = [

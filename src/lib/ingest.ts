@@ -79,12 +79,22 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const DRAW_MONTH = /^\d{4}-\d{2}$/;
 const STATUSES: PassStatus[] = ["valid", "pending", "void"];
 
+/**
+ * What a client has already claimed of a once-per-client activity. Separate from
+ * the natural key because the whole point is that the date and reference do
+ * *not* make a second one distinct.
+ */
+export const claimKey = (clientRef: string, activityCode: string): string =>
+  [clientRef, activityCode].map((p) => p.trim().toLowerCase()).join("|");
+
 export interface IngestContext {
   campaignId: string;
   activities: Activity[];
   clients: ClientRecord[];
   /** Natural keys already in the ledger. */
   existingKeys: Set<string>;
+  /** `claimKey`s of once-per-client activities already earned, void rows aside. */
+  claimed: Set<string>;
 }
 
 /** Header problems are fatal for the whole file, so they are reported separately. */
@@ -101,6 +111,9 @@ export function buildPreview(
   const activityByCode = new Map(ctx.activities.map((a) => [a.code, a]));
   const clientByRef = new Map(ctx.clients.map((c) => [c.externalRef.toLowerCase(), c]));
   const seenInFile = new Set<string>();
+  // Claims made earlier in this same file, so one upload carrying two finConnect
+  // rows for a client lands only the first — the ledger is not consulted twice.
+  const claimedInFile = new Set<string>();
 
   const previewRows = rows.map((row, i): PreviewRow => {
     const clientRef = row.client_ref ?? "";
@@ -166,6 +179,21 @@ export function buildPreview(
     if (seenInFile.has(key)) {
       return { ...filled, outcome: "duplicate", reason: "Repeated earlier in this file" };
     }
+
+    // Checked after the natural key so that re-uploading the very same row still
+    // reads "Already in the ledger", which is the more precise answer.
+    if (activity.oncePerClient && status !== "void") {
+      const claim = claimKey(clientRef, activityCode);
+      if (ctx.claimed.has(claim) || claimedInFile.has(claim)) {
+        return {
+          ...filled,
+          outcome: "duplicate",
+          reason: `${activity.label} counts once per client, and this one already has it`,
+        };
+      }
+      claimedInFile.add(claim);
+    }
+
     seenInFile.add(key);
     return filled;
   });

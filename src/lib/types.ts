@@ -70,6 +70,12 @@ export interface Activity {
    */
   unitLabel: string | null;
   sortOrder: number;
+  /**
+   * Worth passes exactly once per client, however many rows the ledger holds —
+   * downloading the app, submitting a testimonial. Set from `ONCE_PER_CLIENT` in
+   * `src/lib/campaignRules.ts`, because `challenge_types` has no column for it.
+   */
+  oncePerClient: boolean;
 }
 
 export interface Advisor {
@@ -149,11 +155,17 @@ export interface Viewer {
   advisorId: string | null;
 }
 
-/** One row of the advisor's client table. Counts are live passes only. */
+/** One row of the advisor's client table. `gold`/`blue` are live passes only. */
 export interface AdvisorClientRow {
   client: ClientRecord;
   gold: number;
   blue: number;
+  /**
+   * Passes in a closed draw whose result is not recorded yet. Not shown per row
+   * — the columns are the ballot now collecting — but summed across the book so
+   * the page can explain a column of zeroes in the days after a month turns.
+   */
+  awaiting: number;
   /** True once this client has won a published draw — drives the Winner badge. */
   won: boolean;
 }
