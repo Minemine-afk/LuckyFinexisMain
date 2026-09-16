@@ -18,13 +18,27 @@
 -- ---------------------------------------------------------------------------
 -- 1. No month-stamped references
 -- ---------------------------------------------------------------------------
--- The snapshot's signature: "JUN-2026", "2026-07", "Jul upload". A reference
--- naming a period rather than a policy, a referral or an event means the row is
--- restating a balance, not recording an event.
+-- The snapshot's signature. The one this ledger actually carried was
+--
+--   August:test.client05@example.com:purchase_product
+--
+-- — a bare month name, no year. So a month name **on its own** has to count:
+-- requiring a year alongside it, as an earlier version of this check did, let
+-- the real format through, which is the only format it was written for.
+--
+-- A reference naming a period rather than a policy, a referral or an event
+-- means the row is restating a balance, not recording an event.
+--
+-- This one can flag a legitimate reference — "May market update" is a real
+-- event name. That is the intended trade: read what comes back rather than
+-- assuming it is wrong. A month name in a reference is at best ambiguous with
+-- the thing that broke this ledger once already.
 select id, client_id, challenge_code, occurred_on, external_ref
   from public.pass_ledger
  where external_ref ~* '(19|20)[0-9]{2}[-_/ ]?(0[1-9]|1[0-2])'
-    or external_ref ~* '\m(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[-_/ ]?(19|20)?[0-9]{2}\M'
+    or external_ref ~* ('\m(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec'
+                      || '|january|february|march|april|june|july|august'
+                      || '|september|october|november|december)\M')
  order by occurred_on, client_id;
 
 
@@ -46,12 +60,21 @@ having count(*) > 1;
 -- large share of the whole ledger is the load date wearing `occurred_on`'s
 -- clothes — which is what makes every pass land in the ballot for the month the
 -- file was uploaded rather than the month it was earned.
+--
+-- Volume alone is not the test, though: a client event genuinely does put forty
+-- people on one date, and flagging that would train you to ignore this check.
+-- What separates the two is **breadth**. A real busy day is one or two activity
+-- codes — the event, and the guests brought to it. A load date is every code at
+-- once, because that is what a snapshot of everyone's balances looks like.
 select occurred_on,
        count(*) as rows_on_this_day,
-       round(100.0 * count(*) / nullif((select count(*) from public.pass_ledger), 0), 1) as pct_of_ledger
+       round(100.0 * count(*) / nullif((select count(*) from public.pass_ledger), 0), 1) as pct_of_ledger,
+       count(distinct challenge_code) as distinct_activities,
+       string_agg(distinct challenge_code, ', ' order by challenge_code) as which
   from public.pass_ledger
  group by occurred_on
 having count(*) > 0.25 * (select count(*) from public.pass_ledger)
+   and count(distinct challenge_code) >= 4
  order by occurred_on;
 
 

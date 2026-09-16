@@ -90,10 +90,19 @@ end $$;
 -- ---------------------------------------------------------------------------
 -- 4. Who counts as an admin
 -- ---------------------------------------------------------------------------
+-- SECURITY DEFINER, matching `current_advisor_id()`, and not for show: without
+-- it the function runs as the caller, and a caller without USAGE on the `auth`
+-- schema gets "permission denied for schema auth" instead of a yes or a no.
+-- That failure is worse than a refusal — every policy referencing it errors out,
+-- so the insert fails for a reason that has nothing to do with being an admin.
+--
+-- It does not weaken anything. `auth.jwt()` reads a per-request setting, so the
+-- claims it returns are still the caller's own however the function is executed.
 create or replace function public.is_admin()
   returns boolean
   language sql
   stable
+  security definer
   set search_path to 'public'
 as $$
   select coalesce(auth.jwt() -> 'app_metadata' ->> 'role', '') = 'admin';
