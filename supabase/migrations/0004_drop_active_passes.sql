@@ -1,0 +1,87 @@
+-- Drop the `active_passes` view.
+--
+-- A Postgres view runs with its OWNER's permissions unless `security_invoker`
+-- is set. The owner here is `postgres`, which owns the base tables — and a
+-- table's owner is exempt from that table's own RLS unless FORCE ROW LEVEL
+-- SECURITY is set (it is not). So this view over `pass_ledger` hands its caller
+-- every row in the firm's ledger, whatever the policies on `pass_ledger` say.
+--
+-- All seven base tables have RLS enabled with sound policies. This view is the
+-- one object that can walk past them.
+--
+-- Dropping it rather than setting `security_invoker = true`, for three reasons:
+--
+--   1. It is a stale second implementation of the pass rules. It encodes
+--      `status = 'confirmed' AND is_drawn = false` — the rule as of 500b176,
+--      two generations behind the portal. It already disagrees with the numbers
+--      consultants are shown.
+--
+--   2. It breaks under the event-log contract anyway. It inner-joins on
+--      `pl.draw_id`, which is null for ordinary events once the ledger is
+--      reloaded as a log of things that happened, so it would return almost
+--      nothing.
+--
+--   3. Dropping fails loudly; scoping it fails quietly. Nobody has established
+--      what reads this view. A scoped view silently returns fewer rows and can
+--      go unnoticed for weeks; a dropped view errors and names whoever depended
+--      on it. With that question open, the loud failure is the one worth having
+--      — and the window is cheap: test data only, no consultants on the live
+--      site yet.
+--
+-- A view holds no data. This destroys nothing and the undo is at the foot.
+--
+-- Supersedes the unapplied 0003, which would have set `security_invoker`.
+
+begin;
+
+-- NO CASCADE, deliberately. If another database object depends on this view,
+-- Postgres refuses and names it — which is exactly the discovery this change is
+-- for. CASCADE would destroy that object too, silently, and must not be used
+-- here: the error is the answer, not an obstacle.
+drop view public.active_passes;
+
+commit;
+
+-- Before running, keep your own copy of the definition:
+--
+--   select pg_get_viewdef('public.active_passes'::regclass, true);
+--
+-- And check for database objects that depend on it (expect no rows):
+--
+--   select dependent.relname as depends_on_active_passes
+--     from pg_depend d
+--     join pg_rewrite r on r.oid = d.objid
+--     join pg_class dependent on dependent.oid = r.ev_class
+--    where d.refobjid = 'public.active_passes'::regclass
+--      and dependent.relname <> 'active_passes';
+--
+-- That finds views and rules only. Application code, BI tools and saved queries
+-- are invisible to it — they surface as errors after the drop, which is the
+-- point.
+--
+-- Afterwards, expect 0:
+--
+--   select count(*) from pg_class c
+--     join pg_namespace n on n.oid = c.relnamespace
+--    where n.nspname = 'public' and c.relname = 'active_passes';
+--
+--
+-- ---------------------------------------------------------------- rollback
+--
+-- Grants do not survive a drop, so the grant is part of the undo rather than
+-- assumed. Restoring it this way closes the bypass at the same time, so the
+-- rollback leaves the database better off than it was before this migration.
+--
+--   create view public.active_passes
+--     with (security_invoker = true) as
+--   select pl.client_id, d.monthly_draw, d.pass_type, sum(pl.passes_awarded) as passes
+--     from pass_ledger pl
+--     join draws d on d.id = pl.draw_id
+--    where pl.status = 'confirmed'::text and d.is_drawn = false
+--    group by pl.client_id, d.monthly_draw, d.pass_type;
+--
+--   grant select on public.active_passes to authenticated;
+--
+-- Note that restoring it restores the stale rules with it. If something really
+-- does need this view, the better answer is to rewrite it against the current
+-- rules — or to get the figures from the code that owns them.

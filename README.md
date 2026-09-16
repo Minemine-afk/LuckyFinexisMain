@@ -192,6 +192,18 @@ produces a consultant being told their book is empty. The watch is what turns th
 Grants are `SELECT` to `authenticated` only. `anon` is revoked: the app never queries before
 sign-in, so an anonymous key should reach nothing at all.
 
+`supabase/migrations/` holds the changes that got it there, each with its reasoning and its
+undo in the comments. They are run by hand in the SQL editor — there is no migration runner
+wired up, so the numbering is a record of what was applied and in what order rather than
+something a tool enforces. A gap in the sequence means a migration was written and then
+superseded before it ran.
+
+**A view is the one thing that can walk past all of this.** Views run with their owner's
+permissions unless `security_invoker` is set, and the owner of these tables is exempt from
+their RLS — so a view over `pass_ledger` returns the whole firm's ledger whatever the
+policies say. `0004` drops the one that existed. Any view added later needs
+`with (security_invoker = true)` or it reopens the same hole.
+
 ### Headers
 
 `public/_headers` carries a Content-Security-Policy, and it is load-bearing rather than
