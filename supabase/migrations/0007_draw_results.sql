@@ -100,6 +100,51 @@ create unique index if not exists prizes_won_draw_client
 -- ---------------------------------------------------------------------------
 -- OR'd on top of the existing SELECT policies, which stay as they are.
 
+-- **Reading prizes, which the existing policies get wrong for both screens.**
+--
+-- `prizes_won` today has exactly one SELECT policy, "advisor reads own clients
+-- prizes", scoped through `current_advisor_id()`. Two things follow that were
+-- not intended:
+--
+--   1. **An administrator cannot read a single prize row.** `is_admin()` appears
+--      in no policy on this table, so after recording a draw the admin sees
+--      none of what they just recorded, and the Undo button offers to remove
+--      "0 winners". The screen does not work at all without this.
+--
+--   2. **The winners page is per-consultant, not firm-wide.** Another
+--      consultant's winners do not arrive anonymised — they do not arrive. Most
+--      consultants would open the page to two rows or none.
+--
+-- One policy fixes both, and it is deliberately the widest thing in this file,
+-- so it is worth being exact about what it exposes. A `prizes_won` row is a
+-- client **id**, a draw id and a prize string. It carries no name, and `clients`
+-- stays scoped to each consultant — so a consultant reading another's winner
+-- gets a UUID and "Dyson Airwrap", and the page renders it as "A client". The
+-- anonymisation is not a display convention that could be forgotten; it is the
+-- absence of any name to show.
+--
+-- To make the winners page own-clients-only instead, drop this one policy and
+-- keep `prizes_won_admin_select` below. Nothing in the app needs changing —
+-- rows the reader cannot see simply stop appearing.
+-- `using (true)` is not as open as it reads: `to authenticated` above is what
+-- restricts it, and it does so more reliably than a `auth.role() =
+-- 'authenticated'` test in the body would — that is how the existing `draws`
+-- policy is written, because it was granted to `public` and had to check the
+-- role itself. Anonymous callers are refused by the role clause and by the fact
+-- that `anon` holds no grant on this table at all.
+drop policy if exists prizes_won_firm_read on public.prizes_won;
+create policy prizes_won_firm_read on public.prizes_won
+  for select to authenticated
+  using (true);
+
+-- Kept separate rather than folded into the one above, so that dropping the
+-- firm-wide read leaves the administrator's own read intact. The record-a-draw
+-- screen depends on this one; the winners page depends on the other.
+drop policy if exists prizes_won_admin_select on public.prizes_won;
+create policy prizes_won_admin_select on public.prizes_won
+  for select to authenticated
+  using (public.is_admin());
+
 drop policy if exists prizes_won_admin_insert on public.prizes_won;
 create policy prizes_won_admin_insert on public.prizes_won
   for insert to authenticated
