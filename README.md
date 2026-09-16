@@ -203,6 +203,24 @@ attributes; scripts get no such exemption.
 Production builds emit no source map. Pages serves `dist/` wholesale, so an emitted `.map`
 is published next to the bundle and hands any visitor the full annotated source.
 
+### Paging
+
+PostgREST answers at most `db-max-rows` — 1000 on Supabase by default — and **says nothing
+when it truncates**. There is no error and no flag; the response is simply short. Left
+unpaged, a consultant's pass totals would quietly lose whatever fell past the cap, and the
+number on screen would look entirely plausible while being wrong.
+
+So every read that can grow is paged through `fetchAll` in `src/data/supabaseApi.ts`, which
+follows `range()` until a short page comes back. The ledger is the one that actually grows —
+one row per qualifying activity per client for a whole campaign — and it is fetched in
+chunks of 100 client ids, because every id goes into the query string and a few hundred
+UUIDs makes a URL long enough to be rejected outright.
+
+**Every paged query orders by something unique.** `range()` pages by offset, so rows the
+database is free to return in any order can appear on two pages or on none. Where the natural
+sort is not unique — a client's name, a draw's date — the primary key is added as a tiebreak.
+That detail is easy to miss and produces duplicated or missing rows rather than an error.
+
 ### Freshness
 
 Pass counts get read out to clients, so the consultant's page refetches when the tab comes

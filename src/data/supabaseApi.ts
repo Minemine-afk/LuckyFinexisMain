@@ -328,6 +328,87 @@ async function resolveOrEndSession(
   }
 }
 
+/* ---------- paging ---------- */
+
+/**
+ * PostgREST answers at most `db-max-rows` rows — 1000 on Supabase by default —
+ * and says nothing at all when it truncates. There is no error and no flag: the
+ * response is simply short. For this app that would mean a consultant's pass
+ * totals quietly losing whatever fell past the cap, which looks entirely
+ * plausible on screen and is wrong.
+ *
+ * So every read that can return more than a handful of rows is paged.
+ */
+const PAGE_SIZE = 1000;
+
+/** A runaway guard. Nothing here should approach it; if it does, say so. */
+const MAX_ROWS = 100_000;
+
+interface PageResult<T> {
+  data: T[] | null;
+  error: { message: string } | null;
+}
+
+/**
+ * Read every row a query matches, a page at a time.
+ *
+ * **The query must be ordered by something unique.** `range()` pages by offset,
+ * so rows the database is free to return in any order can appear on two pages
+ * or none. Where the natural sort is not unique — a client's name, a draw's
+ * date — the caller adds the primary key as a tiebreak.
+ */
+async function fetchAll<T>(
+  page: (from: number, to: number) => PromiseLike<PageResult<T>>,
+  context: string,
+): Promise<T[]> {
+  const rows: T[] = [];
+
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await page(from, from + PAGE_SIZE - 1);
+    if (error) fail(context, error);
+
+    const batch = data ?? [];
+    rows.push(...batch);
+
+    // A short page is the last page.
+    if (batch.length < PAGE_SIZE) return rows;
+
+    if (rows.length >= MAX_ROWS) {
+      console.error(`[db] ${context}: stopped at ${MAX_ROWS} rows, which should not happen`);
+      throw new ApiError(
+        `${context}. There is more data here than this page can safely total up.`,
+      );
+    }
+  }
+}
+
+/**
+ * Split a list of ids for an `.in()` filter.
+ *
+ * Every id goes into the query string, so a few hundred UUIDs makes a URL long
+ * enough for PostgREST or the CDN in front of it to reject — and the failure
+ * reads as a malformed request rather than "too many clients".
+ */
+const ID_CHUNK = 100;
+
+const chunk = <T,>(xs: T[], size = ID_CHUNK): T[][] => {
+  const out: T[][] = [];
+  for (let i = 0; i < xs.length; i += size) out.push(xs.slice(i, i + size));
+  return out;
+};
+
+/** Run a paged read once per chunk of ids and concatenate the results. */
+async function fetchAllByIds<T>(
+  ids: string[],
+  page: (batch: string[], from: number, to: number) => PromiseLike<PageResult<T>>,
+  context: string,
+): Promise<T[]> {
+  const batches = await Promise.all(
+    chunk(ids).map((batch) => fetchAll<T>((from, to) => page(batch, from, to), context)),
+  );
+  return batches.flat();
+}
+
 /* ---------- provider ---------- */
 
 export const supabaseApi: PortalApi = {
@@ -427,13 +508,18 @@ export const supabaseApi: PortalApi = {
   async getActivities(campaignId) {
     // challenge_types is a global rate card rather than per-campaign, so every
     // active row applies and the campaign id is stamped on in memory.
-    const { data, error } = await supabase()
-      .from("challenge_types")
-      .select("code, label, pass_type, passes_per_unit, unit_noun, sort_order, is_active")
-      .eq("is_active", true)
-      .order("sort_order");
-    if (error) fail("Could not load campaign activities", error);
-    return (data as ChallengeTypeRow[]).map((r) => toActivity(r, campaignId));
+    const rows = await fetchAll<ChallengeTypeRow>(
+      (from, to) =>
+        supabase()
+          .from("challenge_types")
+          .select("code, label, pass_type, passes_per_unit, unit_noun, sort_order, is_active")
+          .eq("is_active", true)
+          .order("sort_order")
+          .order("code") // sort_order is not unique; code is the key
+          .range(from, to),
+      "Could not load campaign activities",
+    );
+    return rows.map((r) => toActivity(r, campaignId));
   },
 
   async getAdvisorClients(advisorId, campaignId) {
@@ -445,17 +531,22 @@ export const supabaseApi: PortalApi = {
     // on it would make a client-supplied value the thing that decides whose
     // book comes back. Row level security already restricts `clients` to the
     // caller's own, so asking for all of them returns exactly theirs.
-    const [{ data: clientRows, error: clientErr }, activities, draws] = await Promise.all([
-      db
-        .from("clients")
-        .select("id, advisor_id, client_name, client_mobile, client_email")
-        .order("client_name"),
+    const [clientRows, activities, draws] = await Promise.all([
+      fetchAll<ClientRow>(
+        (from, to) =>
+          db
+            .from("clients")
+            .select("id, advisor_id, client_name, client_mobile, client_email")
+            .order("client_name")
+            .order("id") // names are not unique, and paging needs a stable sort
+            .range(from, to),
+        "Could not load your clients",
+      ),
       this.getActivities(campaignId),
       this.getDraws(campaignId),
     ]);
-    if (clientErr) fail("Could not load your clients", clientErr);
 
-    const clients = (clientRows as ClientRow[]).map(toClient);
+    const clients = clientRows.map(toClient);
 
     // Belt and braces. If a policy is ever loosened by accident, this turns a
     // silent leak of another consultant's book into a refusal to render.
@@ -472,24 +563,45 @@ export const supabaseApi: PortalApi = {
 
     if (clients.length === 0) return [];
 
+    // The ledger is the read that actually grows: one row per qualifying
+    // activity per client, for a whole campaign. A book of 300 clients puts it
+    // past the cap well before anyone notices the totals are short.
     const ids = clients.map((c) => c.id);
-    const [{ data: ledgerRows, error: ledgerErr }, { data: prizeRows }] = await Promise.all([
-      db.from("pass_ledger").select("*").eq("campaign_id", campaignId).in("client_id", ids),
-      db.from("prizes_won").select("client_id, draw_id").in("client_id", ids),
+    const [ledgerRows, prizeRows] = await Promise.all([
+      fetchAllByIds<LedgerRow>(
+        ids,
+        (batch, from, to) =>
+          db
+            .from("pass_ledger")
+            .select("*")
+            .eq("campaign_id", campaignId)
+            .in("client_id", batch)
+            .order("id")
+            .range(from, to),
+        "Could not load pass activity",
+      ),
+      fetchAllByIds<{ client_id: string; draw_id: string }>(
+        ids,
+        (batch, from, to) =>
+          db
+            .from("prizes_won")
+            .select("client_id, draw_id")
+            .in("client_id", batch)
+            .order("id")
+            .range(from, to),
+        "Could not load prizes",
+      ),
     ]);
-    if (ledgerErr) fail("Could not load pass activity", ledgerErr);
 
     const drawMonths = new Map(draws.map((d) => [d.id, d.drawMonth]));
-    const events = (ledgerRows as LedgerRow[]).map((r) => toPassEvent(r, drawMonths));
+    const events = ledgerRows.map((r) => toPassEvent(r, drawMonths));
     const view = passView(campaign, draws);
 
     // A prize only counts once its draw has been run, so a result entered ahead
     // of the draw does not put a Winner badge on the table early.
     const drawnIds = new Set(draws.filter((d) => d.isDrawn).map((d) => d.id));
     const winners = new Set(
-      ((prizeRows ?? []) as { client_id: string; draw_id: string }[])
-        .filter((p) => drawnIds.has(p.draw_id))
-        .map((p) => p.client_id),
+      prizeRows.filter((p) => drawnIds.has(p.draw_id)).map((p) => p.client_id),
     );
 
     return clients
@@ -516,38 +628,50 @@ export const supabaseApi: PortalApi = {
   async getClientStatement(clientId, campaignId): Promise<ClientStatement> {
     const db = supabase();
 
-    const [{ data: clientRow, error: clientErr }, { data: ledgerRows, error: ledgerErr }] =
-      await Promise.all([
-        db
-          .from("clients")
-          .select("id, advisor_id, client_name, client_mobile, client_email")
-          .eq("id", clientId)
-          .single<ClientRow>(),
-        db
-          .from("pass_ledger")
-          .select("*")
-          .eq("client_id", clientId)
-          .eq("campaign_id", campaignId)
-          .order("occurred_on"),
-      ]);
+    // No advisor check here: row level security answers with the client only if
+    // they belong to the caller, so a tampered clientId returns nothing and the
+    // `.single()` below fails rather than showing someone else's statement.
+    const [{ data: clientRow, error: clientErr }, ledgerRows] = await Promise.all([
+      db
+        .from("clients")
+        .select("id, advisor_id, client_name, client_mobile, client_email")
+        .eq("id", clientId)
+        .single<ClientRow>(),
+      fetchAll<LedgerRow>(
+        (from, to) =>
+          db
+            .from("pass_ledger")
+            .select("*")
+            .eq("client_id", clientId)
+            .eq("campaign_id", campaignId)
+            .order("occurred_on")
+            .order("id") // two activities can share a date
+            .range(from, to),
+        "Could not load pass activity",
+      ),
+    ]);
     if (clientErr || !clientRow) fail("Could not load the client", clientErr);
-    if (ledgerErr) fail("Could not load pass activity", ledgerErr);
 
     const draws = await this.getDraws(campaignId);
     const drawById = new Map(draws.map((d) => [d.id, d]));
 
-    const { data: prizeRows, error: prizeErr } = await db
-      .from("prizes_won")
-      .select("id, client_id, draw_id, prize_won")
-      .eq("client_id", clientId);
-    if (prizeErr) fail("Could not load prizes", prizeErr);
+    const prizeRows = await fetchAll<PrizeRow>(
+      (from, to) =>
+        db
+          .from("prizes_won")
+          .select("id, client_id, draw_id, prize_won")
+          .eq("client_id", clientId)
+          .order("id")
+          .range(from, to),
+      "Could not load prizes",
+    );
 
     return {
       client: toClient(clientRow!),
-      events: (ledgerRows as LedgerRow[]).map((r) =>
+      events: ledgerRows.map((r) =>
         toPassEvent(r, new Map(draws.map((d) => [d.id, d.drawMonth]))),
       ),
-      winners: (prizeRows as PrizeRow[])
+      winners: prizeRows
         // Only prizes from a draw that has actually been run; a result entered
         // ahead of the draw is not the portal's news to break.
         .filter((p) => drawById.get(p.draw_id)?.isDrawn)
@@ -564,55 +688,65 @@ export const supabaseApi: PortalApi = {
   },
 
   async getDraws(campaignId) {
-    const { data, error } = await supabase()
-      .from("draws")
-      .select("id, campaign_id, monthly_draw, draw_date, pass_type, is_drawn")
-      .eq("campaign_id", campaignId)
-      .order("draw_date");
-    if (error) fail("Could not load draws", error);
-
     // Every row, drawn or not, and one per pass type: which draws have run is
     // what decides whether a pass is still live, and the ones still to come are
     // what a client's remaining passes are waiting for.
-    return (data as DrawRow[]).map(toDraw);
+    const rows = await fetchAll<DrawRow>(
+      (from, to) =>
+        supabase()
+          .from("draws")
+          .select("id, campaign_id, monthly_draw, draw_date, pass_type, is_drawn")
+          .eq("campaign_id", campaignId)
+          .order("draw_date")
+          .order("id") // gold and blue share a date
+          .range(from, to),
+      "Could not load draws",
+    );
+    return rows.map(toDraw);
   },
 
   async getWinners(campaignId: string, drawMonth: DrawMonth): Promise<DrawWinner[]> {
     const db = supabase();
 
-    const { data: drawRows, error: drawErr } = await db
-      .from("draws")
-      .select("id, campaign_id, monthly_draw, draw_date, pass_type, is_drawn")
-      .eq("campaign_id", campaignId)
-      .eq("is_drawn", true);
-    if (drawErr) fail("Could not load the draw", drawErr);
+    const drawRows = await fetchAll<DrawRow>(
+      (from, to) =>
+        db
+          .from("draws")
+          .select("id, campaign_id, monthly_draw, draw_date, pass_type, is_drawn")
+          .eq("campaign_id", campaignId)
+          .eq("is_drawn", true)
+          .order("id")
+          .range(from, to),
+      "Could not load the draw",
+    );
 
-    const inMonth = (drawRows as DrawRow[]).filter((d) => drawMonthOfRow(d) === drawMonth);
+    const inMonth = drawRows.filter((d) => drawMonthOfRow(d) === drawMonth);
     if (inMonth.length === 0) return [];
     const byId = new Map(inMonth.map((d) => [d.id, d]));
 
-    const { data: prizeRows, error: prizeErr } = await db
-      .from("prizes_won")
-      .select("id, client_id, draw_id, prize_won")
-      .in("draw_id", inMonth.map((d) => d.id));
-    if (prizeErr) fail("Could not load winners", prizeErr);
-
-    const prizes = prizeRows as PrizeRow[];
+    const prizes = await fetchAllByIds<PrizeRow>(
+      inMonth.map((d) => d.id),
+      (batch, from, to) =>
+        db
+          .from("prizes_won")
+          .select("id, client_id, draw_id, prize_won")
+          .in("draw_id", batch)
+          .order("id")
+          .range(from, to),
+      "Could not load winners",
+    );
     if (prizes.length === 0) return [];
 
     // Winner names come from `clients`, so row level security decides which are
     // legible: an advisor sees their own clients named and the rest anonymous,
     // rather than the whole firm's client list.
-    const { data: nameRows } = await db
-      .from("clients")
-      .select("id, client_name")
-      .in("id", prizes.map((p) => p.client_id));
-    const names = new Map(
-      ((nameRows ?? []) as { id: string; client_name: string }[]).map((c) => [
-        c.id,
-        shortenName(c.client_name),
-      ]),
+    const nameRows = await fetchAllByIds<{ id: string; client_name: string }>(
+      prizes.map((p) => p.client_id),
+      (batch, from, to) =>
+        db.from("clients").select("id, client_name").in("id", batch).order("id").range(from, to),
+      "Could not load winners",
     );
+    const names = new Map(nameRows.map((c) => [c.id, shortenName(c.client_name)]));
 
     return prizes.map((p) => ({
       id: p.id,

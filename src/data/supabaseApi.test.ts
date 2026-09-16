@@ -187,27 +187,42 @@ describe("loading a consultant's clients", () => {
     client_mobile: "90000000", client_email: `${id}@example.com`,
   });
 
-  /** A chainable PostgREST stub: filters return itself, awaiting resolves. */
+  /**
+   * A chainable PostgREST stub that honours `range()` — which is the point.
+   * A stub that ignored paging would pass whether or not the code pages, and
+   * the bug being fixed here is precisely that the real server answers a short
+   * page and says nothing about it.
+   *
+   * Built fresh per `from()` call, so concurrent reads of the same table do not
+   * share range state.
+   */
   const chain = (list: unknown[], single: unknown = null) => {
+    let range: [number, number] | null = null;
     const self: Record<string, unknown> = {};
     for (const m of ["select", "eq", "in", "order", "limit", "not"]) self[m] = () => self;
+    self.range = (from: number, to: number) => {
+      range = [from, to];
+      return self;
+    };
     self.maybeSingle = () => Promise.resolve({ data: single, error: null });
     self.single = () => Promise.resolve({ data: single, error: null });
-    self.then = (ok: (v: unknown) => unknown, no?: (e: unknown) => unknown) =>
-      Promise.resolve({ data: list, error: null }).then(ok, no);
+    self.then = (ok: (v: unknown) => unknown, no?: (e: unknown) => unknown) => {
+      const page = range ? list.slice(range[0], range[1] + 1) : list;
+      return Promise.resolve({ data: page, error: null }).then(ok, no);
+    };
     return self;
   };
 
   const withClients = (clients: unknown[], ledger: unknown[] = []) => {
-    const tables: Record<string, unknown> = {
-      campaigns: chain([], CAMPAIGN),
-      pass_ledger: chain(ledger, { date_updated: "2026-09-10" }),
-      challenge_types: chain(RATE_CARD),
-      draws: chain([]),
-      clients: chain(clients),
-      prizes_won: chain([]),
+    const rows: Record<string, [unknown[], unknown]> = {
+      campaigns: [[], CAMPAIGN],
+      pass_ledger: [ledger, { date_updated: "2026-09-10" }],
+      challenge_types: [RATE_CARD, null],
+      draws: [[], null],
+      clients: [clients, null],
+      prizes_won: [[], null],
     };
-    mocks.from.mockImplementation((t: string) => tables[t]);
+    mocks.from.mockImplementation((t: string) => chain(...(rows[t] ?? [[], null])));
   };
 
   it("returns the consultant's own clients", async () => {
@@ -221,6 +236,37 @@ describe("loading a consultant's clients", () => {
     const rows = await supabaseApi.getAdvisorClients("adv-1", "camp-1");
     expect(rows.map((r) => r.client.id)).toEqual(["cli-1"]);
     expect(rows[0].blue).toBe(5);
+  });
+
+  it("totals every ledger row, not just the first page the server returns", async () => {
+    // PostgREST caps a response at 1000 rows and gives no sign it has done so.
+    // 2,400 rows is three pages; a single unpaged read would silently total the
+    // first 1000 and look entirely plausible doing it.
+    const ROWS = 2_400;
+    const ledger = Array.from({ length: ROWS }, (_, i) => ({
+      id: `l${i}`, client_id: "cli-1", campaign_id: "camp-1", draw_id: null,
+      challenge_code: "attend_event", units: 1, passes_awarded: 5, rate_applied: 5,
+      status: "confirmed", occurred_on: "2026-09-04", date_updated: null,
+      external_ref: `Briefing ${i}`, description: null,
+    }));
+    withClients([clientRow("cli-1", "adv-1")], ledger);
+
+    const rows = await supabaseApi.getAdvisorClients("adv-1", "camp-1");
+    expect(rows[0].blue).toBe(ROWS * 5);
+  });
+
+  it("stops at the last page rather than looping on a short one", async () => {
+    // Exactly one full page, then nothing. The loop must not spin.
+    const ledger = Array.from({ length: 1_000 }, (_, i) => ({
+      id: `l${i}`, client_id: "cli-1", campaign_id: "camp-1", draw_id: null,
+      challenge_code: "attend_event", units: 1, passes_awarded: 5, rate_applied: 5,
+      status: "confirmed", occurred_on: "2026-09-04", date_updated: null,
+      external_ref: `Briefing ${i}`, description: null,
+    }));
+    withClients([clientRow("cli-1", "adv-1")], ledger);
+
+    const rows = await supabaseApi.getAdvisorClients("adv-1", "camp-1");
+    expect(rows[0].blue).toBe(5_000);
   });
 
   it("cannot be made to fetch another consultant's book by editing the id", async () => {
