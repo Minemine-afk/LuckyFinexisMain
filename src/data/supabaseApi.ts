@@ -964,8 +964,8 @@ export const supabaseApi: PortalApi = {
           client_id: w.clientId,
           prize_won: w.prize.trim(),
         })),
-        // Absorbs a double-submit rather than listing a winner twice. The index
-        // this names is created by 0007.
+        // Arbitrates on `prizes_won_draw_client`, the one-prize-per-client rule
+        // 0007 adds. Absorbs a double-submit rather than listing a winner twice.
         { onConflict: "draw_id,client_id", ignoreDuplicates: true },
       );
       if (error) fail("Could not save the winners", error);

@@ -55,16 +55,42 @@ alter table public.prizes_won enable row level security;
 -- ---------------------------------------------------------------------------
 -- 1. One prize per client per draw
 -- ---------------------------------------------------------------------------
--- Makes a double-submit idempotent, the same way `pass_ledger_natural_key` does
--- for the importer: the second click is absorbed by the database rather than
--- listing a winner twice. The portal's insert names this index as its conflict
--- target, so without it `on conflict` has nothing to arbitrate on and the call
--- fails outright.
+-- **This is stricter than the table already is, deliberately.**
 --
--- Run the duplicate check first if the table already has rows:
+-- `prizes_won_client_id_draw_id_prize_won_key` is `UNIQUE (client_id, draw_id,
+-- prize_won)` — three columns, including the prize text. That permits one client
+-- to appear twice in a draw as long as the two prizes differ. The campaign rule
+-- is that a client wins at most once in a month's draw, so the index below says
+-- so, and the portal's insert arbitrates on it.
 --
---   select draw_id, client_id, count(*) from public.prizes_won
---    group by 1, 2 having count(*) > 1;
+-- It also does the job the three-column version did: a double-submit is absorbed
+-- by the database rather than listing a winner twice, the same property
+-- `pass_ledger_natural_key` gives the importer.
+--
+-- The existing constraint is left alone. It is subsumed by this one — anything
+-- this index rejects, that one would too — so dropping it would only remove a
+-- backstop.
+--
+-- The guard below is here because `create unique index` on data that already
+-- violates it fails with an error naming the index and nothing else, which is a
+-- poor way to learn that one of your clients has two prizes in a draw.
+do $$
+declare offenders int;
+begin
+  select count(*) into offenders from (
+    select 1 from public.prizes_won group by draw_id, client_id having count(*) > 1
+  ) dupes;
+
+  if offenders > 0 then
+    raise exception
+      'Cannot add the one-prize-per-client rule: % client(s) already hold more '
+      'than one prize in a single draw. List them with: select draw_id, '
+      'client_id, count(*) from public.prizes_won group by 1, 2 having count(*) '
+      '> 1; — then decide which prize each of them keeps before re-running.',
+      offenders;
+  end if;
+end $$;
+
 create unique index if not exists prizes_won_draw_client
   on public.prizes_won (draw_id, client_id);
 
