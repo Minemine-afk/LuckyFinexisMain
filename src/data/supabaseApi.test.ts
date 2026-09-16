@@ -446,3 +446,265 @@ describe("watching the session", () => {
     expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("importing pass activity", () => {
+  /**
+   * The importer is the only thing in the portal that writes. What matters is
+   * that it writes rows the reader can make sense of — the column mapping here
+   * is the seam between `ingest.ts`, which knows nothing about Supabase, and a
+   * ledger whose columns are named after a different vocabulary entirely.
+   */
+  const CAMPAIGN = {
+    id: "camp-1", name: "ATW",
+    start_date: "2026-07-01", end_date: "2026-12-31", is_active: true,
+  };
+  const RATE_CARD = [
+    { code: "attend_event", label: "Attend Client Events", pass_type: "blue",
+      passes_per_unit: 5, unit_noun: "Event", sort_order: 1, is_active: true },
+    { code: "finconnect", label: "Download finConnect", pass_type: "blue",
+      passes_per_unit: 1, unit_noun: null, sort_order: 2, is_active: true },
+  ];
+  const CLIENTS = [
+    { id: "cli-1", advisor_id: "adv-1", client_name: "Jake Peralta",
+      client_mobile: "90000000", client_email: "jake@b99.co" },
+    { id: "cli-2", advisor_id: "adv-2", client_name: "Rosa Diaz",
+      client_mobile: "90000001", client_email: "rosa@b99.co" },
+  ];
+  const DRAWS = [
+    { id: "draw-sep", campaign_id: "camp-1", monthly_draw: "September",
+      draw_date: "2026-10-07", pass_type: "Blue", is_drawn: false },
+  ];
+
+  const HEAD = "client_ref,activity_code,units,earned_on,reference";
+  const csv = (...rows: string[]) => new File([[HEAD, ...rows].join("\n")], "upload.csv");
+
+  /** Everything `upsert` was asked to write, in the order it was asked. */
+  let written: { rows: Record<string, unknown>[]; opts: Record<string, unknown> }[];
+  /** How many of each batch the database claims to have actually inserted. */
+  let insertedPerBatch: (n: number) => number;
+
+  const table = (list: unknown[], single: unknown = null) => {
+    let range: [number, number] | null = null;
+    const self: Record<string, unknown> = {};
+    for (const m of ["select", "eq", "in", "order", "limit", "not"]) self[m] = () => self;
+    self.range = (from: number, to: number) => {
+      range = [from, to];
+      return self;
+    };
+    self.maybeSingle = () => Promise.resolve({ data: single, error: null });
+    self.single = () => Promise.resolve({ data: single, error: null });
+    self.upsert = (rows: Record<string, unknown>[], opts: Record<string, unknown>) => {
+      written.push({ rows, opts });
+      const kept = insertedPerBatch(rows.length);
+      return {
+        select: () =>
+          Promise.resolve({ data: rows.slice(0, kept).map((_, i) => ({ id: `new-${i}` })), error: null }),
+      };
+    };
+    self.then = (ok: (v: unknown) => unknown, no?: (e: unknown) => unknown) => {
+      const page = range ? list.slice(range[0], range[1] + 1) : list;
+      return Promise.resolve({ data: page, error: null }).then(ok, no);
+    };
+    return self;
+  };
+
+  const withLedger = (ledger: unknown[] = []) => {
+    const rows: Record<string, [unknown[], unknown]> = {
+      campaigns: [[], CAMPAIGN],
+      pass_ledger: [ledger, { date_updated: "2026-09-10" }],
+      challenge_types: [RATE_CARD, null],
+      draws: [DRAWS, null],
+      clients: [CLIENTS, null],
+      prizes_won: [[], null],
+    };
+    mocks.from.mockImplementation((t: string) => table(...(rows[t] ?? [[], null])));
+  };
+
+  const ledgerRow = (over: Record<string, unknown> = {}) => ({
+    client_id: "cli-1", challenge_code: "attend_event", occurred_on: "2026-09-04",
+    external_ref: "Briefing", status: "confirmed", ...over,
+  });
+
+  beforeEach(() => {
+    written = [];
+    insertedPerBatch = (n) => n;
+    withLedger();
+  });
+
+  describe("the dry run", () => {
+    it("names the missing columns without reading the database", async () => {
+      const err = await rejection(
+        supabaseApi.previewUpload(new File(["client_ref\nC-1"], "bad.csv"), "camp-1"),
+      );
+      expect(err.message).toMatch(/activity_code/);
+      expect(mocks.from).not.toHaveBeenCalled();
+    });
+
+    it("resolves a client by the email a spreadsheet actually carries", async () => {
+      const p = await supabaseApi.previewUpload(
+        csv("jake@b99.co,attend_event,2,2026-09-04,Briefing"),
+        "camp-1",
+      );
+      expect(p.rows[0].outcome).toBe("insert");
+      expect(p.rows[0].clientName).toBe("Jake Peralta");
+      expect(p.rows[0].passes).toBe(10);
+    });
+
+    it("recognises a row already in the ledger, however the file names the client", async () => {
+      withLedger([ledgerRow()]);
+      // The stored row was written against `cli-1`; this file says "jake@b99.co".
+      // Keyed on the raw text those are different rows and the passes double.
+      const p = await supabaseApi.previewUpload(
+        csv("jake@b99.co,attend_event,1,2026-09-04,Briefing"),
+        "camp-1",
+      );
+      expect(p.rows[0].outcome).toBe("duplicate");
+      expect(p.rows[0].reason).toBe("Already in the ledger");
+    });
+
+    it("treats a null external_ref in the ledger as a blank reference", async () => {
+      withLedger([ledgerRow({ challenge_code: "finconnect", external_ref: null })]);
+      const p = await supabaseApi.previewUpload(csv("cli-1,finconnect,1,2026-09-04,"), "camp-1");
+      expect(p.rows[0].outcome).toBe("duplicate");
+    });
+
+    it("carries a once-per-client claim over from the ledger", async () => {
+      withLedger([ledgerRow({ challenge_code: "finconnect", external_ref: "install" })]);
+      const p = await supabaseApi.previewUpload(
+        csv("cli-1,finconnect,1,2026-09-20,reinstall"),
+        "camp-1",
+      );
+      expect(p.rows[0].outcome).toBe("duplicate");
+      expect(p.rows[0].reason).toMatch(/once per client/);
+    });
+
+    it("lets a voided claim be re-earned", async () => {
+      withLedger([
+        ledgerRow({ challenge_code: "finconnect", external_ref: "install", status: "void" }),
+      ]);
+      const p = await supabaseApi.previewUpload(
+        csv("cli-1,finconnect,1,2026-09-20,reinstall"),
+        "camp-1",
+      );
+      expect(p.rows[0].outcome).toBe("insert");
+    });
+
+    it("writes nothing", async () => {
+      await supabaseApi.previewUpload(csv("cli-1,attend_event,1,2026-09-04,x"), "camp-1");
+      expect(written).toEqual([]);
+    });
+  });
+
+  describe("the commit", () => {
+    const commit = async (...rows: string[]) => {
+      const p = await supabaseApi.previewUpload(csv(...rows), "camp-1");
+      return supabaseApi.commitUpload(p, "camp-1");
+    };
+
+    it("maps a row onto the ledger's own columns", async () => {
+      await commit("jake@b99.co,attend_event,2,2026-09-04,Briefing");
+
+      expect(written).toHaveLength(1);
+      expect(written[0].rows[0]).toMatchObject({
+        campaign_id: "camp-1",
+        client_id: "cli-1",
+        challenge_code: "attend_event",
+        units: 2,
+        passes_awarded: 10,
+        rate_applied: 5,
+        status: "valid",
+        occurred_on: "2026-09-04",
+        external_ref: "Briefing",
+      });
+    });
+
+    it("stamps date_updated, which is what the 'passes as of' line reads", async () => {
+      await commit("cli-1,attend_event,1,2026-09-04,x");
+      expect(written[0].rows[0].date_updated).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    });
+
+    it("never writes a null reference, because nulls do not collide", async () => {
+      // Postgres treats two nulls as distinct, so a null here would exempt every
+      // blank-reference row from the unique index meant to protect it.
+      await commit("cli-1,finconnect,1,2026-09-04,");
+      expect(written[0].rows[0].external_ref).toBe("");
+    });
+
+    it("asks the database to skip a duplicate rather than fail the batch", async () => {
+      await commit("cli-1,attend_event,1,2026-09-04,x");
+      expect(written[0].opts).toMatchObject({
+        onConflict: "campaign_id,client_id,challenge_code,occurred_on,external_ref",
+        ignoreDuplicates: true,
+      });
+    });
+
+    it("writes only the accepted rows", async () => {
+      const result = await commit(
+        "cli-1,attend_event,1,2026-09-04,x",
+        "nobody@nowhere.example,attend_event,1,2026-09-04,y",
+      );
+      expect(written[0].rows).toHaveLength(1);
+      expect(result).toEqual({ inserted: 1, skipped: 1 });
+    });
+
+    it("reports what the database inserted, not what the preview hoped to", async () => {
+      // The race: another admin loaded the same file between the dry run and
+      // this call, so the index skips rows the preview had cleared.
+      insertedPerBatch = () => 1;
+      const result = await commit(
+        "cli-1,attend_event,1,2026-09-04,x",
+        "cli-1,attend_event,1,2026-09-05,y",
+      );
+      expect(result).toEqual({ inserted: 1, skipped: 1 });
+    });
+
+    it("splits a large load into batches", async () => {
+      const rows = Array.from(
+        { length: 1_200 },
+        (_, i) => `cli-1,attend_event,1,2026-09-04,ref-${i}`,
+      );
+      await commit(...rows);
+      expect(written.map((w) => w.rows.length)).toEqual([500, 500, 200]);
+    });
+
+    it("does not go near the database when there is nothing to write", async () => {
+      const result = await commit("nobody@nowhere.example,attend_event,1,2026-09-04,y");
+      expect(written).toEqual([]);
+      expect(result).toEqual({ inserted: 0, skipped: 1 });
+    });
+
+    it("points a deferred pass at the draw it was deferred to", async () => {
+      const p = await supabaseApi.previewUpload(
+        new File(
+          [`${HEAD},draw_month\ncli-1,attend_event,1,2026-08-04,x,2026-09`],
+          "upload.csv",
+        ),
+        "camp-1",
+      );
+      await supabaseApi.commitUpload(p, "camp-1");
+      expect(written[0].rows[0].draw_id).toBe("draw-sep");
+    });
+
+    it("leaves draw_id null when the pass goes into its own month", async () => {
+      // Which is correct, not a gap: a read derives the ballot from the date.
+      await commit("cli-1,attend_event,1,2026-09-04,x");
+      expect(written[0].rows[0].draw_id).toBe(null);
+    });
+
+    it("refuses the whole file rather than lose a deferral it cannot record", async () => {
+      // No November draw exists, so `draw_id` would be null and the next read
+      // would quietly move this pass back into August.
+      const p = await supabaseApi.previewUpload(
+        new File(
+          [`${HEAD},draw_month\ncli-1,attend_event,1,2026-08-04,x,2026-11`],
+          "upload.csv",
+        ),
+        "camp-1",
+      );
+      const err = await rejection(supabaseApi.commitUpload(p, "camp-1"));
+
+      expect(err.message).toMatch(/2026-11/);
+      expect(written).toEqual([]);
+    });
+  });
+});

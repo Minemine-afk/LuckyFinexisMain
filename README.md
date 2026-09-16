@@ -10,7 +10,7 @@ whole portal can be clicked through before a Supabase project exists.
 ```bash
 npm install
 npm run dev          # http://localhost:5173, demo data, no backend needed
-npm test             # 65 tests over the pass arithmetic, CSV parser and ingest rules
+npm test             # 130 tests over the pass arithmetic, CSV parser, ingest rules and provider
 npm run build        # tsc -b && vite build -> dist/
 ```
 
@@ -103,8 +103,9 @@ and `testimonial`. These must match `challenge_types.code` exactly: a code that 
 exist makes the cap silently do nothing, which is what happened when the list was first
 written from the demo dataset's codes rather than the database's.
 
-The cap is applied **on read**, not only on import — the ledger is loaded into Supabase
-outside this portal, so duplicates already stored would otherwise keep counting. Of a
+The cap is applied **on read**, not only on import. The importer refuses a second one, but
+rows already in the ledger from before it existed — or written straight into Supabase — would
+otherwise keep counting. Of a
 client's non-void rows for such an activity the earliest survives, capped to **one unit**;
 the rest are ignored silently. It is a cap on units rather than passes, which is what keeps
 a capped testimonial worth its full 3 passes rather than 1. A voided row never holds the
@@ -123,6 +124,13 @@ entry. That is the natural key, and it is why re-uploading last month's export a
 rather than doubling everybody's passes. `reference` — a policy number, a referral name, an
 event name — is what separates two genuinely different events on the same day.
 
+The key is built from the **resolved client**, not from whatever text the file used to name
+them. A spreadsheet may identify a client by email one month and by a client code the next;
+keyed on the raw text those are two different keys for one event, and re-running a load would
+double the passes. `pass_ledger` carries a unique index on the same five values, so the
+guarantee survives the application layer being bypassed, or two admins loading the same file
+at once.
+
 For a once-per-client activity the date and reference are exactly what must *not* make a
 second one distinct, so those rows are matched on client and activity alone — against the
 ledger and against earlier rows in the same file, so one upload carrying two finConnect rows
@@ -139,7 +147,32 @@ Optional: `fc_code`, `client_name`, `client_email`, `client_mobile`, `reference`
 `status`, `void_reason`.
 
 Header names are matched loosely, so `Client Ref` and `client_ref` both land. The admin page
-documents every column and offers a blank template.
+documents every column, lists the live activity codes, and offers a blank template built from
+that same rate card — so the example rows are, by construction, rows that import.
+
+### How `client_ref` is matched
+
+**Any identifier that names one client**: their email address, their client code, or their id.
+Every choice of a single one was wrong for someone — `clients` has no reference column, so the
+Supabase mapping puts the primary key in `externalRef`, and nobody types UUIDs into a
+spreadsheet. Accepting all three works with emails today and with a proper client code the day
+one exists, with no further change.
+
+A value matching **two** clients is rejected with a reason rather than assigned to one of them.
+Couples who are both clients of the same consultant often share an email address, and silently
+filing one person's passes against their spouse is worse than refusing the row. Worth knowing
+before a first load:
+
+```sql
+select client_email, count(*) from clients
+ where client_email is not null group by client_email having count(*) > 1;
+```
+
+### Reloading the ledger
+
+`supabase/migrations/0005_pass_ledger_writes.sql` is what makes the importer able to write, and
+`supabase/checks/ledger-shape.sql` is a read-only file of queries that confirm a load landed as
+an event log rather than as a snapshot. Both carry their own instructions.
 
 ## Architecture
 
@@ -147,9 +180,18 @@ documents every column and offers a blank template.
 Browser ──► Cloudflare Pages (static React app)
    │
    ├──► Supabase PostgREST      reads, constrained by row level security
-   ├──► Supabase Auth           email + password for consultants and admins
-   └──► Pages Functions ──► Supabase service role   CSV ingest and other privileged writes
+   │                            plus the admin-only CSV import (see below)
+   └──► Supabase Auth           email + password for consultants and admins
 ```
+
+There are no Pages Functions and no service role key anywhere. **The CSV import writes to
+`pass_ledger` from the browser**, which is a deliberate exception to the rule that privileged
+writes go through a server: the write is admin-only and insert-only, admin is claimed from
+`app_metadata` — the one part of the JWT a user cannot edit — and the property that actually
+matters, that re-running a load changes nothing, is enforced by a unique index rather than by
+the code that calls it. There is no UPDATE or DELETE grant at all, so the ledger stays
+append-only whatever a policy says later. A Pages Function becomes the right answer once there
+is a second privileged write to justify one.
 
 Reads go straight from the browser to Supabase. **Row level security is the access control** —
 a consultant asking for every pass event in the firm simply receives their own clients'. The
@@ -379,12 +421,13 @@ npm run pages:deploy
 
 Environment variables are build-time, so changing one needs a fresh build to take effect.
 For a demo deployment with no backend, `VITE_USE_MOCK=true` is the only one required. For a
-real deployment set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, and keep the service
-role key out of the browser entirely:
+real deployment set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
 
-```bash
-npx wrangler pages secret put SUPABASE_SERVICE_ROLE_KEY
-```
+The **service role key has no home in this project at all** — not as a `VITE_` variable, where
+it would be compiled into the bundle every visitor downloads, and not as a Pages secret either,
+since there is no server-side code to read one. Anything that needs it is run by hand in the
+Supabase SQL editor. The anon key is safe to commit: its only claim is `role: anon`, and row
+level security gates every table.
 
 `public/_redirects` serves the shell for every path, so a deep link like `/clients` returns
 the app rather than a 404. `public/_headers` sets the security headers and caches hashed
@@ -397,25 +440,23 @@ and vice versa.
 
 ## Not built yet
 
-This pass is the front end. Still to come, in rough order:
+Still to come, in rough order:
 
-1. **SQL migrations** — the tables above, plus the row level security policies the whole
-   security model rests on. Nothing should reach production before these exist and are tested.
-2. **Pages Functions** — `POST /api/uploads/preview` and `POST /api/uploads/commit`, which
-   verify the caller's JWT, re-check that they are an admin, and reuse `src/lib/ingest.ts` so
-   the browser and the server agree on what a valid row is. `supabaseApi` already calls them.
-3. **Admin: record a draw** — draws are run offline and the result recorded. The app reads
+1. **Admin: record a draw** — draws are run offline and the result recorded. The app reads
    `draws.is_drawn` and `prizes_won` correctly, but has no screen to set them: both are
    entered in Supabase for now. The screen is a short one — pick the winner, name the prize,
    mark the draw drawn — and marking it drawn is what uses up every pass entered into it, so
    it needs saying plainly on the button. This is the most visible gap: until a draw is
    recorded, everyone who entered it sits in `awaiting`, looking at passes with no outcome.
-4. **Admin: campaign artwork and winners** — the mockups have an admin uploading the campaign
+2. **Admin: campaign artwork and winners** — the mockups have an admin uploading the campaign
    details image and publishing each month's winners. Both are read correctly by the
    consultant view; neither has an editor yet. Until artwork is uploaded, the details pop-up
    falls back to the campaign's earning rules rendered from the activity table.
-5. **Account provisioning** — invite, first-login password set, and password reset.
-6. **Sub-admin role** — a restricted admin that can import data but not manage campaigns.
+3. **Account provisioning** — invite, first-login password set, and password reset.
+4. **Sub-admin role** — a restricted admin that can import data but not manage campaigns.
+5. **Error monitoring** — the error boundary keeps a crash from blanking the page, but nobody
+   is told it happened. Until something reports them, a crash is only ever discovered by the
+   person it happened to.
 
 Winners are listed to other consultants by first name and last initial. Revisit that with
 whoever owns client privacy before launch.

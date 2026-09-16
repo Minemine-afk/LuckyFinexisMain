@@ -97,11 +97,88 @@ describe("row validation", () => {
   });
 });
 
+describe("matching a client_ref to a client", () => {
+  it("accepts the client reference", () => {
+    const p = preview(`${HEAD}\nC-1001,attend_event,1,2026-09-01,x`);
+    expect(p.rows[0].clientId).toBe("cli-1");
+  });
+
+  it("accepts an email address, which is what a spreadsheet usually carries", () => {
+    const p = preview(`${HEAD}\njake@b99.co,attend_event,1,2026-09-01,x`);
+    expect(p.rows[0].outcome).toBe("insert");
+    expect(p.rows[0].clientId).toBe("cli-1");
+  });
+
+  it("accepts the client id itself", () => {
+    const p = preview(`${HEAD}\ncli-1,attend_event,1,2026-09-01,x`);
+    expect(p.rows[0].clientId).toBe("cli-1");
+  });
+
+  it("ignores case and surrounding space in the reference", () => {
+    const p = preview(`${HEAD}\n"  JAKE@B99.CO ",attend_event,1,2026-09-01,x`);
+    expect(p.rows[0].clientId).toBe("cli-1");
+  });
+
+  it("names the client it resolved, even when the file did not", () => {
+    const p = preview(`${HEAD}\njake@b99.co,attend_event,1,2026-09-01,x`);
+    expect(p.rows[0].clientName).toBe("Jake Peralta");
+  });
+
+  /**
+   * Couples who are both clients of the same consultant often share an email
+   * address. Filing one person's passes against their spouse is worse than
+   * refusing the row and asking for a reference that names one of them.
+   */
+  it("refuses a reference that matches two clients rather than picking one", () => {
+    const context = ctx();
+    context.clients = seed.clients.map((c) =>
+      c.id === "cli-2" ? { ...c, email: "jake@b99.co" } : c,
+    );
+    const p = preview(`${HEAD}\njake@b99.co,attend_event,1,2026-09-01,x`, context);
+    expect(p.rows[0].outcome).toBe("reject");
+    expect(p.rows[0].reason).toMatch(/matches more than one client/);
+    expect(p.rows[0].clientId).toBe("");
+  });
+
+  it("still resolves a shared client by a reference unique to them", () => {
+    const context = ctx();
+    context.clients = seed.clients.map((c) =>
+      c.id === "cli-2" ? { ...c, email: "jake@b99.co" } : c,
+    );
+    const p = preview(`${HEAD}\nC-1002,attend_event,1,2026-09-01,x`, context);
+    expect(p.rows[0].clientId).toBe("cli-2");
+  });
+
+  it("keys a row on the resolved client, so email and reference agree", () => {
+    const byRef = preview(`${HEAD}\nC-1001,attend_event,1,2026-09-01,x`);
+    const byEmail = preview(`${HEAD}\njake@b99.co,attend_event,1,2026-09-01,x`);
+    expect(byEmail.rows[0].naturalKey).toBe(byRef.rows[0].naturalKey);
+  });
+
+  it("treats a row loaded by email as already seen when it was loaded by reference", () => {
+    const byRef = preview(`${HEAD}\nC-1001,attend_event,1,2026-09-01,x`);
+    const p = preview(
+      `${HEAD}\njake@b99.co,attend_event,1,2026-09-01,x`,
+      ctx([byRef.rows[0].naturalKey]),
+    );
+    expect(p.rows[0].outcome).toBe("duplicate");
+  });
+
+  it("caps a once-per-client activity across both spellings of the client", () => {
+    const p = preview(
+      `${HEAD}\n` +
+        `C-1001,finconnect,1,2026-09-03,install\n` +
+        `jake@b99.co,finconnect,1,2026-09-18,reinstall`,
+    );
+    expect(p.rows.map((r) => r.outcome)).toEqual(["insert", "duplicate"]);
+  });
+});
+
 describe("deduplication", () => {
   const row = `C-1001,attend_event,1,2026-09-01,Sep briefing`;
 
   it("skips a row already in the ledger", () => {
-    const key = naturalKey(seed.campaign.id, "C-1001", "attend_event", "2026-09-01", "Sep briefing");
+    const key = naturalKey(seed.campaign.id, "cli-1", "attend_event", "2026-09-01", "Sep briefing");
     const p = preview(`${HEAD}\n${row}`, ctx([key]));
     expect(p.counts.duplicate).toBe(1);
     expect(p.rows[0].reason).toBe("Already in the ledger");
@@ -121,7 +198,7 @@ describe("deduplication", () => {
   });
 
   it("ignores case and padding when matching a row it has seen", () => {
-    const key = naturalKey(seed.campaign.id, "c-1001", "attend_event", "2026-09-01", "sep briefing");
+    const key = naturalKey(seed.campaign.id, "CLI-1", "attend_event", "2026-09-01", "sep briefing");
     const p = preview(`${HEAD}\n${row}`, ctx([key]));
     expect(p.counts.duplicate).toBe(1);
   });
@@ -172,14 +249,14 @@ describe("once-per-client activities", () => {
   });
 
   it("turns one away when the client already has it in the ledger", () => {
-    const context = ctx([], [claimKey("C-1001", "finconnect")]);
+    const context = ctx([], [claimKey("cli-1", "finconnect")]);
     const p = preview(`${HEAD}\nC-1001,finconnect,1,2026-09-18,reinstall`, context);
     expect(p.rows[0].outcome).toBe("duplicate");
     expect(toPassEvents(p, context, "t")).toHaveLength(0);
   });
 
   it("does not let one client's claim block another's", () => {
-    const context = ctx([], [claimKey("C-1001", "finconnect")]);
+    const context = ctx([], [claimKey("cli-1", "finconnect")]);
     const p = preview(`${HEAD}\nC-1002,finconnect,1,2026-09-18,install`, context);
     expect(p.rows[0].outcome).toBe("insert");
   });
@@ -205,8 +282,8 @@ describe("once-per-client activities", () => {
   });
 
   it("prefers the more precise reason when the very same row is re-uploaded", () => {
-    const key = naturalKey(seed.campaign.id, "C-1001", "finconnect", "2026-09-03", "install");
-    const context = ctx([key], [claimKey("C-1001", "finconnect")]);
+    const key = naturalKey(seed.campaign.id, "cli-1", "finconnect", "2026-09-03", "install");
+    const context = ctx([key], [claimKey("cli-1", "finconnect")]);
     const p = preview(`${HEAD}\nC-1001,finconnect,1,2026-09-03,install`, context);
     expect(p.rows[0].reason).toBe("Already in the ledger");
   });

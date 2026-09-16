@@ -79,12 +79,13 @@ ledger = loadLedger();
 const delay = <T,>(value: T): Promise<T> =>
   new Promise((resolve) => setTimeout(() => resolve(value), 120));
 
+// Keyed on the client id rather than the external reference, matching both the
+// natural key the importer builds and the unique index on `pass_ledger`.
 const keyOf = (e: PassEvent): string => {
-  const client = seed.clients.find((c) => c.id === e.clientId);
   const activity = seed.activities.find((a) => a.id === e.activityId);
   return naturalKey(
     e.campaignId,
-    client?.externalRef ?? "",
+    e.clientId,
     activity?.code ?? "",
     e.earnedOn,
     e.reference,
@@ -103,9 +104,8 @@ const ingestContext = (campaignId: string): IngestContext => ({
       .filter((e) => e.status !== "void")
       .filter((e) => seed.activities.find((a) => a.id === e.activityId)?.oncePerClient)
       .map((e) => {
-        const client = seed.clients.find((c) => c.id === e.clientId);
         const activity = seed.activities.find((a) => a.id === e.activityId);
-        return claimKey(client?.externalRef ?? "", activity?.code ?? "");
+        return claimKey(e.clientId, activity?.code ?? "");
       }),
   ),
 });

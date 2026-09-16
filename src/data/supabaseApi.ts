@@ -1,5 +1,14 @@
 import { supabase } from "../lib/supabase";
-import type { UploadPreview } from "../lib/ingest";
+import { parseCsv } from "../lib/csv";
+import {
+  buildPreview,
+  claimKey,
+  missingHeaders,
+  naturalKey,
+  toPassEvents,
+  type IngestContext,
+  type UploadPreview,
+} from "../lib/ingest";
 import { isOncePerClient } from "../lib/campaignRules";
 import { awaitingPasses, livePasses, passView } from "../lib/passes";
 import { shortenName } from "../lib/format";
@@ -73,6 +82,30 @@ interface LedgerRow {
   date_updated: string | null;
   external_ref: string | null;
   description: string | null;
+}
+
+/** Just enough of a ledger row to rebuild a natural key and a once-per-client claim. */
+interface LedgerKeyRow {
+  client_id: string;
+  challenge_code: string;
+  occurred_on: string;
+  external_ref: string | null;
+  status: string | null;
+}
+
+/** A row on its way into `pass_ledger`. */
+interface LedgerInsert {
+  campaign_id: string;
+  client_id: string;
+  challenge_code: string;
+  draw_id: string | null;
+  units: number;
+  passes_awarded: number;
+  rate_applied: number;
+  status: PassStatus;
+  occurred_on: string;
+  external_ref: string;
+  date_updated: string;
 }
 
 interface DrawRow {
@@ -804,15 +837,192 @@ export const supabaseApi: PortalApi = {
     }));
   },
 
-  async previewUpload(): Promise<UploadPreview> {
-    throw new ApiError(
-      "CSV upload is not connected to this database yet. The ledger is loaded outside the portal for now.",
-    );
+  async previewUpload(file, campaignId): Promise<UploadPreview> {
+    // Parse before asking the database for anything: a file with the wrong
+    // columns is the common mistake, and it should be answered immediately
+    // rather than after four paged reads.
+    const { headers, rows, lines } = parseCsv(await file.text());
+    const missing = missingHeaders(headers);
+    if (missing.length) {
+      throw new ApiError(`The file is missing required columns: ${missing.join(", ")}`);
+    }
+
+    const ctx = await ingestContext(campaignId, await this.getActivities(campaignId));
+    return buildPreview(file.name, rows, lines, ctx);
   },
 
-  async commitUpload(): Promise<CommitResult> {
-    throw new ApiError(
-      "CSV upload is not connected to this database yet. The ledger is loaded outside the portal for now.",
-    );
+  /**
+   * Write the accepted rows of a preview.
+   *
+   * Two things guard against a double load, and they are deliberately not the
+   * same thing. The preview marks a row already in the ledger as a duplicate and
+   * never offers it here; the unique index on `pass_ledger` refuses it even if
+   * that check were skipped, wrong, or racing another admin who uploaded the
+   * same file a second ago. `ignoreDuplicates` turns the second guard into a
+   * skipped row rather than a failed batch, so a file that is half new still
+   * lands its new half.
+   *
+   * The count returned is what the database actually inserted, not what the
+   * preview hoped to: those differ precisely in the race, which is the case
+   * worth reporting honestly.
+   */
+  async commitUpload(preview, campaignId): Promise<CommitResult> {
+    const db = supabase();
+    const activities = await this.getActivities(campaignId);
+    const ctx = await ingestContext(campaignId, activities, { withLedger: false });
+    const events = toPassEvents(preview, ctx, "upload");
+    if (events.length === 0) {
+      return { inserted: 0, skipped: preview.counts.duplicate + preview.counts.reject };
+    }
+
+    const byCode = new Map(activities.map((a) => [a.code, a]));
+    const draws = await this.getDraws(campaignId);
+    const now = new Date().toISOString();
+
+    // `draw_id` is written only for a deferral, and that restraint is the point.
+    // It is the one case `occurred_on` cannot express, so without it a pass held
+    // back to a later ballot quietly returns to the month it was earned in. Set
+    // on every row instead, it would be asserting something the campaign rules
+    // can contradict: gold pools to the close of the campaign wherever it was
+    // earned, so naming September's gold draw on a September row states a
+    // membership that is not true. The ballot is derived; this column records
+    // the exception, not the rule.
+    const drawIdFor = (passType: PassType, month: DrawMonth): string | null =>
+      draws.find((d) => d.passType === passType && d.drawMonth === month)?.id ?? null;
+
+    const inserts: LedgerInsert[] = [];
+    const orphans: string[] = [];
+
+    for (const e of events) {
+      const activity = byCode.get(e.activityId)!;
+      const deferred = e.drawMonth !== e.earnedOn.slice(0, 7);
+      const drawId = deferred ? drawIdFor(activity.passType, e.drawMonth) : null;
+      if (deferred && !drawId) orphans.push(`${e.drawMonth} (${activity.passType})`);
+
+      inserts.push({
+        campaign_id: campaignId,
+        client_id: e.clientId,
+        // `challenge_types` is keyed by code, so the activity id is the code.
+        challenge_code: e.activityId,
+        draw_id: drawId,
+        units: e.units,
+        passes_awarded: e.passes,
+        // Stored alongside the total so a row still explains itself after the
+        // rate card changes — which is the whole reason the column exists.
+        rate_applied: activity.passesPerUnit,
+        status: e.status,
+        occurred_on: e.earnedOn,
+        // Never null: the unique index includes this column, and in Postgres
+        // two nulls are not equal, so a null here would let blank-reference
+        // rows duplicate freely.
+        external_ref: e.reference,
+        date_updated: now,
+      });
+    }
+
+    // Refuse the whole file rather than write rows whose deferral would quietly
+    // revert on the next read. Naming the months is what makes it fixable.
+    if (orphans.length > 0) {
+      throw new ApiError(
+        `Nothing was written. These rows defer a pass to a draw that does not ` +
+          `exist yet: ${[...new Set(orphans)].join(", ")}. Add the draw first, ` +
+          `or leave draw_month blank.`,
+      );
+    }
+
+    let inserted = 0;
+    // Chunked because a whole campaign's backlog in one request is a payload
+    // large enough for PostgREST or the CDN in front of it to refuse.
+    for (const batch of chunk(inserts, 500)) {
+      const { data, error } = await db
+        .from("pass_ledger")
+        .upsert(batch, {
+          onConflict: "campaign_id,client_id,challenge_code,occurred_on,external_ref",
+          ignoreDuplicates: true,
+        })
+        .select("id");
+      if (error) fail("Could not save the upload", error);
+      inserted += data?.length ?? 0;
+    }
+
+    return {
+      inserted,
+      skipped:
+        preview.counts.duplicate + preview.counts.reject + (events.length - inserted),
+    };
   },
 };
+
+/**
+ * Everything `buildPreview` needs to judge a row, read from the database.
+ *
+ * Clients come back through row level security, so this is the caller's own
+ * book — which for the admin who runs an import is the whole firm. A row naming
+ * a client the caller cannot see is rejected as unknown rather than written
+ * blind, which is the right failure.
+ *
+ * `withLedger` is off at commit time: the preview already decided what to
+ * write, and the unique index is what stops a duplicate now.
+ */
+async function ingestContext(
+  campaignId: string,
+  activities: Activity[],
+  { withLedger = true }: { withLedger?: boolean } = {},
+): Promise<IngestContext> {
+  const db = supabase();
+
+  const [clientRows, ledgerRows] = await Promise.all([
+    fetchAll<ClientRow>(
+      (from, to) =>
+        db
+          .from("clients")
+          .select("id, advisor_id, client_name, client_mobile, client_email")
+          .order("client_name")
+          .order("id") // names are not unique, and paging needs a stable sort
+          .range(from, to),
+      "Could not load clients",
+    ),
+    withLedger
+      ? fetchAll<LedgerKeyRow>(
+          (from, to) =>
+            db
+              .from("pass_ledger")
+              .select("client_id, challenge_code, occurred_on, external_ref, status")
+              .eq("campaign_id", campaignId)
+              .order("id")
+              .range(from, to),
+          "Could not load the existing ledger",
+        )
+      : Promise.resolve([] as LedgerKeyRow[]),
+  ]);
+
+  const oncePerClient = new Set(
+    activities.filter((a) => a.oncePerClient).map((a) => a.code),
+  );
+
+  return {
+    campaignId,
+    activities,
+    clients: clientRows.map(toClient),
+    existingKeys: new Set(
+      ledgerRows.map((r) =>
+        naturalKey(
+          campaignId,
+          r.client_id,
+          r.challenge_code,
+          // A date column answers as YYYY-MM-DD, but a timestamp would carry a
+          // time the CSV cannot express and could never match.
+          r.occurred_on.slice(0, 10),
+          r.external_ref ?? "",
+        ),
+      ),
+    ),
+    // A voided row does not hold the slot: a withdrawn testimonial should not
+    // block the real one from being loaded later.
+    claimed: new Set(
+      ledgerRows
+        .filter((r) => oncePerClient.has(r.challenge_code) && asStatus(r.status) !== "void")
+        .map((r) => claimKey(r.client_id, r.challenge_code)),
+    ),
+  };
+}

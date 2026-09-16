@@ -5,11 +5,12 @@ import { USE_MOCK, api } from "../data";
 import { resetMockLedger } from "../data/mockApi";
 import { OPTIONAL_HEADERS, REQUIRED_HEADERS, type UploadPreview } from "../lib/ingest";
 import { shortDate } from "../lib/format";
+import type { Activity } from "../lib/types";
 import { useAsync } from "../lib/useAsync";
 
 const COLUMN_HELP: Record<string, string> = {
-  client_ref: "The firm's client code. Must already exist in the client list.",
-  activity_code: "Which qualifying activity, e.g. attend_client_event.",
+  client_ref: "Anything that names one client — their email address, their client code, or their id. It must already exist in the client list, and it must match only one of them.",
+  activity_code: "Which qualifying activity. Use a code exactly as it appears in the earning rules below.",
   units: "How many — cases, referrals, events, guests. A whole number above zero.",
   earned_on: "Date the activity happened, YYYY-MM-DD.",
   fc_code: "Consultant code. Informational; the client's own record decides who sees them.",
@@ -22,12 +23,21 @@ const COLUMN_HELP: Record<string, string> = {
   void_reason: "Why a void pass was withdrawn.",
 };
 
-const TEMPLATE = [
-  "client_ref,activity_code,units,earned_on,reference,status",
-  "C-1001,attend_client_event,1,2026-09-12,Q3 portfolio briefing,valid",
-  "C-1001,bring_guest_to_event,2,2026-09-12,Q3 portfolio briefing,valid",
-  "C-1002,purchase_qualifying_product,1,2026-09-03,POL-88410,pending",
-].join("\n");
+/**
+ * The blank template, built from the campaign's own rate card.
+ *
+ * Not a fixed string, because a fixed string goes stale silently: the codes are
+ * whatever `challenge_types` currently carries, and a template naming codes the
+ * campaign has since renamed produces a page of rejected rows and no clue why.
+ * Generating it means the example rows are, by construction, rows that import.
+ */
+function template(activities: Activity[]): string {
+  const header = "client_ref,activity_code,units,earned_on,reference,status";
+  const example = activities
+    .slice(0, 3)
+    .map((a, i) => `CLIENT-REF,${a.code},1,2026-09-0${i + 1},${a.unitLabel ?? "reference"},valid`);
+  return [header, ...example].join("\n");
+}
 
 /**
  * Campaign data administration.
@@ -46,6 +56,10 @@ export function AdminPage() {
   const fileInput = useRef<HTMLInputElement>(null);
 
   const campaign = useAsync(() => api.getCampaign(), []);
+  const activities = useAsync(
+    async () => (campaign.data ? api.getActivities(campaign.data.id) : []),
+    [campaign.data?.id],
+  );
 
   async function choose(file: File | undefined) {
     if (!file || !campaign.data) return;
@@ -82,7 +96,9 @@ export function AdminPage() {
     }
   }
 
-  const templateHref = `data:text/csv;charset=utf-8,${encodeURIComponent(TEMPLATE)}`;
+  const templateHref = `data:text/csv;charset=utf-8,${encodeURIComponent(
+    template(activities.data ?? []),
+  )}`;
 
   if (campaign.loading) return <Loading label="Loading the campaign…" />;
   if (campaign.error) return <div className="page"><Alert kind="err">{campaign.error}</Alert></div>;
@@ -100,15 +116,6 @@ export function AdminPage() {
 
       {error && <Alert kind="err">{error}</Alert>}
       {done && <Alert kind="ok">{done}</Alert>}
-
-      {!USE_MOCK && (
-        <Alert kind="info">
-          <strong>Upload is not connected to this database yet.</strong> The ledger is
-          loaded outside the portal for now, and the campaign's rate card uses a column per
-          challenge type rather than a row per event — so this importer's format does not
-          match it. The screen below still shows the validation rules it would apply.
-        </Alert>
-      )}
 
       <div className="card">
         <div className="card-pad">
@@ -294,6 +301,55 @@ export function AdminPage() {
             <span className="mono">client_ref</span> both work. A row is considered already
             recorded when its client, activity, date and reference all match one in the
             ledger.
+          </p>
+        </div>
+      </div>
+
+      {/* The codes, from the campaign's own rate card rather than a list kept
+          here by hand. A spreadsheet is prepared against this table, and a code
+          that has been renamed since someone wrote it down rejects every row it
+          appears on — so the only safe version of this list is the live one. */}
+      <div className="card" style={{ marginTop: 18 }}>
+        <div className="card-pad">
+          <h2 style={{ fontSize: 17, marginBottom: 10 }}>Activity codes</h2>
+          {activities.loading && <Loading label="Loading the earning rules…" />}
+          {activities.error && <Alert kind="err">{activities.error}</Alert>}
+          {activities.data && (
+            <table className="schema-table">
+              <thead>
+                <tr>
+                  <th>activity_code</th>
+                  <th>Activity</th>
+                  <th>Earns</th>
+                </tr>
+              </thead>
+              <tbody>
+                {activities.data.map((a) => (
+                  <tr key={a.code}>
+                    <td className="mono">{a.code}</td>
+                    <td>
+                      {a.label}
+                      {a.oncePerClient && (
+                        <>
+                          {" "}
+                          <span className="badge">once per client</span>
+                        </>
+                      )}
+                    </td>
+                    <td>
+                      {a.passesPerUnit} {a.passType}{" "}
+                      {a.passesPerUnit === 1 ? "pass" : "passes"}
+                      {a.unitLabel ? ` per ${a.unitLabel.toLowerCase()}` : ""}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <p style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 14 }}>
+            An activity marked <b>once per client</b> counts a single time however many
+            rows name it. The extras are reported as already recorded rather than
+            rejected, so a file carrying a client's whole history still imports cleanly.
           </p>
         </div>
       </div>
