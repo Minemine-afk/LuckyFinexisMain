@@ -260,8 +260,8 @@ export const draws: Draw[] = [
 ];
 
 export const drawWinners: DrawWinner[] = [
-  { id: "win-1", drawId: "draw-blue-1", drawMonth: FIRST_MONTH, clientId: "cli-1", displayName: "Jake P.", prize: "OSIM uJolly", passType: "blue" },
-  { id: "win-2", drawId: "draw-blue-1", drawMonth: FIRST_MONTH, clientId: "cli-3", displayName: "Terry J.", prize: "Dyson Airwrap", passType: "blue" },
+  { id: "win-1", drawId: "draw-blue-1", drawMonth: FIRST_MONTH, clientId: "cli-1", displayName: "Jake Peralta", prize: "OSIM uJolly", passType: "blue" },
+  { id: "win-2", drawId: "draw-blue-1", drawMonth: FIRST_MONTH, clientId: "cli-3", displayName: "Terry Jeffords", prize: "Dyson Airwrap", passType: "blue" },
 ];
 
 export const demoViewers: Viewer[] = [

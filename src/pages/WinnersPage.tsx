@@ -1,17 +1,21 @@
 import { Alert, EmptyState, Loading } from "../components/Loading";
 import { api } from "../data";
-import { monthAndYear, passTypeLabel } from "../lib/format";
+import { monthAndYear } from "../lib/format";
 import { useAsync, useRefreshOnFocus } from "../lib/useAsync";
 import type { DrawWinner } from "../lib/types";
 
 /**
  * Past winners, month by month, across the whole firm.
  *
- * Firm-wide rather than one consultant's own, because a campaign is a firm-wide
- * thing and a page showing a consultant nothing most months would not be worth
- * opening. What keeps that from being a client list handed to a competitor is
- * row level security: a consultant's own clients come back named, and everyone
- * else's arrive without a name and are rendered as "A client".
+ * Firm-wide and fully named: a campaign is a firm-wide thing, and a page showing
+ * a consultant nothing most months would not be worth opening.
+ *
+ * The names come from `prizes_won.winner_name`, written when the draw is
+ * recorded, not from a join onto `clients`. That is what lets every winner be
+ * named without opening the client book: a consultant reading another's winner
+ * gets a name and a prize and no route to anything else. It also makes the list
+ * a record of what was announced rather than a live lookup — a client renamed
+ * next year does not rewrite a result the firm has already published.
  *
  * Only draws that have actually been run appear. A prize recorded against a draw
  * still open is invisible here and everywhere else, which is what makes the
@@ -77,15 +81,9 @@ export function WinnersPage() {
         </div>
       ))}
 
-      {/* Precisely what the code does, not what would sound reassuring.
-          `getWinners` shortens every name it can read, including your own
-          clients', and a client belonging to another consultant comes back with
-          no name at all because row level security withheld the row. */}
       {months.length > 0 && (
         <p style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 14 }}>
-          Every winner is listed by first name and last initial, because this page is
-          visible to every consultant in the firm. A winner shown as "A client" belongs
-          to another consultant, whose client list you are not able to see.
+          This page lists every winner in the firm, not only your own clients.
         </p>
       )}
     </div>
@@ -100,7 +98,6 @@ function WinnerTable({ winners }: { winners: DrawWinner[] }) {
           <tr>
             <th scope="col">Winner</th>
             <th scope="col">Prize</th>
-            <th scope="col">Pass Type</th>
           </tr>
         </thead>
         <tbody>
@@ -108,9 +105,6 @@ function WinnerTable({ winners }: { winners: DrawWinner[] }) {
             <tr key={w.id}>
               <td className="name" data-label="Winner">{w.displayName}</td>
               <td data-label="Prize">{w.prize}</td>
-              <td data-label="Pass Type">
-                <span className={`badge ${w.passType}`}>{passTypeLabel(w.passType)}</span>
-              </td>
             </tr>
           ))}
         </tbody>

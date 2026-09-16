@@ -113,13 +113,13 @@ describe("recording and undoing a draw", () => {
     expect((await drawById(AWAITING.id)).isDrawn).toBe(true);
   });
 
-  it("shortens the winner's name the way the real provider does", async () => {
+  it("names the winner in full, as the firm-wide page shows them", async () => {
     const winner = await winnerOf();
     await mockApi.recordDraw(CAMPAIGN, AWAITING.id, [
       { clientId: winner.client.id, prize: "Dyson Airwrap" },
     ]);
     const published = await mockApi.getWinners(CAMPAIGN, AWAITING.drawMonth);
-    expect(published[0].displayName).toMatch(/^\S+ \S\.$/);
+    expect(published[0].displayName).toBe(winner.client.fullName);
   });
 
   it("puts a recorded draw back when the demo is reset", async () => {

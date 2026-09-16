@@ -21,7 +21,7 @@ npm run build        # tsc -b && vite build -> dist/
 | **Consultant** | `/clients` | Every client of theirs holding passes — name, mobile, email, live gold and blue totals, a Winner badge on anyone who has taken a draw — with the full breakdown behind the magnifier icon, campaign details, and past monthly winners. |
 | **Admin** | `/admin` | CSV upload for pass activity, with a dry run before anything is written. |
 | **Admin** | `/admin/draws` | Record the result of a draw — winners by mobile number, and what they won. |
-| **Both** | `/winners` | Every draw that has been run, month by month, across the firm. |
+| **Both** | `/winners` | Every draw that has been run, month by month — every winner in the firm, named, with what they won. |
 | **Both** | `/profile` | Your own account details, and changing your password. Reached from the person icon in the rail. |
 
 One sign-in form serves both. Which portal you land on is decided by the role on your
@@ -219,6 +219,25 @@ A mobile number that matches **two** clients is refused rather than guessed at �
 as the importer's `client_ref`, for the same reason. A client holding no passes in the draw is
 refused too: they were not entered into it, so a number that resolves to them is a typo that
 happens to hit a real person.
+
+### The winners page names everyone
+
+`/winners` lists every winner in the firm in full, not only the reader's own clients. The names
+come from `prizes_won.winner_name`, written when the draw is recorded, rather than from a join
+onto `clients`.
+
+That choice is the reason the page can name everyone without widening anything. A policy
+letting any consultant read the `clients` row of any winner would work, and would hand over
+those winners' email addresses and mobile numbers too — a policy admits a row, and the row has
+columns. The page only ever wanted a name, so the name is what it stores.
+
+It also makes the list a record of what was announced rather than a live lookup: a client
+renamed or removed next year does not rewrite a result the firm has already published. The
+trade is that a name corrected afterwards does not propagate — correct it by undoing the draw
+and recording it again.
+
+To make the page own-clients-only instead, drop the `prizes_won_firm_read` policy from `0007`.
+No code changes: rows the reader cannot see simply stop appearing.
 
 Undo reopens the draw and removes its winners. It is the one place the app deletes anything,
 and that is deliberate: `pass_ledger` records things that happened and is corrected by voiding

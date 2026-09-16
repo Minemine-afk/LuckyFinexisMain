@@ -1,0 +1,36 @@
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://neomyduxgyrzyjzyhxxf.supabase.co; connect-src 'self' https://neomyduxgyrzyjzyhxxf.supabase.co; frame-ancestors 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; upgrade-insecure-requests
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=(), usb=()
+  Cache-Control: no-cache
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Why each of these is here.
+#
+# Content-Security-Policy is the important one: the signed-in user's Supabase
+# session lives in localStorage, so any script that runs on this origin can read
+# it. `script-src 'self'` means only the hashed bundle runs — no inline script,
+# no CDN, nothing injected. `connect-src` pins the only backend the app may talk
+# to, so a compromised dependency cannot post a stolen token anywhere else.
+#   - 'unsafe-inline' in style-src covers React's style={{ }} attributes, which
+#     are inline styles. Scripts get no such exemption.
+#   - The Supabase host is spelled out because the project is compiled in as a
+#     default (src/lib/supabase.ts). Pointing the app at a different project
+#     means changing this line too.
+#   - fonts.googleapis.com serves the Poppins stylesheet, fonts.gstatic.com the
+#     font files themselves.
+#   - frame-ancestors replaces X-Frame-Options for browsers that honour it; the
+#     older header stays for those that do not.
+#
+# Cache-Control: no-cache on /* covers the app shell. Every route is rewritten
+# to index.html by _redirects, so the request path is /clients rather than
+# /index.html and a rule naming the file would never match. "no-cache" means
+# revalidate, not "never store" — without it a stale shell keeps pointing at
+# asset hashes that no longer exist, which is a white page. /assets/* overrides
+# it below, and is safe to cache for a year because Vite content-hashes those
+# filenames.

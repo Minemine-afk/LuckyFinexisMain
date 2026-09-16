@@ -9,7 +9,6 @@ import {
   type UploadPreview,
 } from "../lib/ingest";
 import { awaitingPasses, ballotPasses, livePasses, passView } from "../lib/passes";
-import { shortenName } from "../lib/format";
 import type {
   Activity,
   AdvisorClientRow,
@@ -294,9 +293,10 @@ export const mockApi: PortalApi = {
         drawId,
         drawMonth: draw.drawMonth,
         clientId: e.clientId,
-        displayName: shortenName(
-          seed.clients.find((c) => c.id === e.clientId)?.fullName ?? "A client",
-        ),
+        // Full name, matching the real provider: the winners page is firm-wide
+        // and names every winner, and the name is captured at the moment the
+        // draw is recorded rather than joined on every read.
+        displayName: seed.clients.find((c) => c.id === e.clientId)?.fullName ?? "A client",
         prize: e.prize.trim(),
         passType: draw.passType,
       })),

@@ -815,7 +815,7 @@ describe("recording a draw", () => {
         campaigns: [[], CAMPAIGN],
         draws: [DRAWS, null],
         pass_ledger: [[], { date_updated: "2026-09-10" }],
-        clients: [[], null],
+        clients: [[{ id: "cli-1", client_name: "Jake Peralta" }], null],
         challenge_types: [[], null],
         prizes_won: [[], null],
       };
@@ -844,7 +844,13 @@ describe("recording a draw", () => {
     ]);
 
     expect(calls[0].payload).toEqual([
-      { draw_id: "draw-aug", client_id: "cli-1", prize_won: "Dyson Airwrap" },
+      {
+        draw_id: "draw-aug",
+        client_id: "cli-1",
+        prize_won: "Dyson Airwrap",
+        // Read from `clients`, not taken from the page — see recordDraw.
+        winner_name: "Jake Peralta",
+      },
     ]);
     expect(calls[1].payload).toEqual({ is_drawn: true });
   });

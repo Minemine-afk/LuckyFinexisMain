@@ -134,6 +134,12 @@ interface PrizeRow {
   client_id: string;
   draw_id: string;
   prize_won: string;
+  /**
+   * The winner's name as it was when the draw was recorded, added by 0008.
+   * Null only on rows written before that migration, which it backfills — the
+   * `clients` fallback below is for a row inserted by hand since.
+   */
+  winner_name: string | null;
 }
 
 /* ---------- value mapping ---------- */
@@ -782,7 +788,7 @@ export const supabaseApi: PortalApi = {
       (from, to) =>
         db
           .from("prizes_won")
-          .select("id, client_id, draw_id, prize_won")
+          .select("id, client_id, draw_id, prize_won, winner_name")
           .eq("client_id", clientId)
           .order("id")
           .range(from, to),
@@ -852,7 +858,7 @@ export const supabaseApi: PortalApi = {
       (batch, from, to) =>
         db
           .from("prizes_won")
-          .select("id, client_id, draw_id, prize_won")
+          .select("id, client_id, draw_id, prize_won, winner_name")
           .in("draw_id", batch)
           .order("id")
           .range(from, to),
@@ -860,23 +866,32 @@ export const supabaseApi: PortalApi = {
     );
     if (prizes.length === 0) return [];
 
-    // Winner names come from `clients`, so row level security decides which are
-    // legible: an advisor sees their own clients named and the rest anonymous,
-    // rather than the whole firm's client list.
-    const nameRows = await fetchAllByIds<{ id: string; client_name: string }>(
-      prizes.map((p) => p.client_id),
-      (batch, from, to) =>
-        db.from("clients").select("id, client_name").in("id", batch).order("id").range(from, to),
-      "Could not load winners",
-    );
-    const names = new Map(nameRows.map((c) => [c.id, shortenName(c.client_name)]));
+    // The name is on the prize row itself, written when the draw was recorded.
+    // That is what lets the winners page name every winner in the firm without
+    // opening `clients` to everyone — a policy admitting a client row would hand
+    // over their email and mobile too, and the page only ever wanted a name.
+    //
+    // The `clients` read below is a fallback for rows predating 0008 or inserted
+    // by hand, and is skipped entirely when there are none — which, after 0008's
+    // backfill, is always.
+    const unnamed = prizes.filter((p) => !p.winner_name?.trim());
+    const names = new Map<string, string>();
+    if (unnamed.length > 0) {
+      const nameRows = await fetchAllByIds<{ id: string; client_name: string }>(
+        unnamed.map((p) => p.client_id),
+        (batch, from, to) =>
+          db.from("clients").select("id, client_name").in("id", batch).order("id").range(from, to),
+        "Could not load winners",
+      );
+      for (const c of nameRows) names.set(c.id, c.client_name);
+    }
 
     return prizes.map((p) => ({
       id: p.id,
       drawId: p.draw_id,
       drawMonth,
       clientId: p.client_id,
-      displayName: names.get(p.client_id) ?? "A client",
+      displayName: p.winner_name?.trim() || names.get(p.client_id) || "A client",
       prize: p.prize_won,
       passType: asPassType(byId.get(p.draw_id)?.pass_type ?? null),
     }));
@@ -958,11 +973,24 @@ export const supabaseApi: PortalApi = {
     const db = supabase();
 
     if (winners.length > 0) {
+      // The name is read from `clients` rather than taken from the page. The
+      // page has it and could pass it, but then a display name and the client id
+      // it claims to describe would be two independent values that could
+      // disagree — and this one is written down permanently.
+      const clientRows = await fetchAllByIds<{ id: string; client_name: string }>(
+        winners.map((w) => w.clientId),
+        (batch, from, to) =>
+          db.from("clients").select("id, client_name").in("id", batch).order("id").range(from, to),
+        "Could not look up the winners",
+      );
+      const nameOf = new Map(clientRows.map((c) => [c.id, c.client_name]));
+
       const { error } = await db.from("prizes_won").upsert(
         winners.map((w) => ({
           draw_id: drawId,
           client_id: w.clientId,
           prize_won: w.prize.trim(),
+          winner_name: nameOf.get(w.clientId) ?? null,
         })),
         // Arbitrates on `prizes_won_draw_client`, the one-prize-per-client rule
         // 0007 adds. Absorbs a double-submit rather than listing a winner twice.
