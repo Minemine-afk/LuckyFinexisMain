@@ -108,7 +108,8 @@ interface LedgerInsert {
    * what gets written and the total is the database's to derive.
    */
   rate_applied: number;
-  status: PassStatus;
+  /** The database's own vocabulary, not the app's. See `STATUS_TO_DB`. */
+  status: string;
   occurred_on: string;
   external_ref: string;
   date_updated: string;
@@ -163,6 +164,23 @@ function asStatus(value: string | null): PassStatus {
   if (PENDING_WORDS.some((w) => v.includes(w))) return "pending";
   return "valid";
 }
+
+/**
+ * The reverse, for the one place that writes.
+ *
+ * The app's word for a countable pass is `valid`; this database's is
+ * `confirmed`, which is also the column's default and what every row loaded
+ * before the importer existed carries. Writing `valid` would work — `asStatus`
+ * reads anything it does not recognise as valid — but it would leave the ledger
+ * speaking two vocabularies depending on which decade a row arrived in, and
+ * would break outright against a CHECK constraint naming the three the table
+ * already uses.
+ */
+const STATUS_TO_DB: Record<PassStatus, string> = {
+  valid: "confirmed",
+  pending: "pending",
+  void: "void",
+};
 
 const MONTH_NAMES = [
   "january", "february", "march", "april", "may", "june",
@@ -916,7 +934,7 @@ export const supabaseApi: PortalApi = {
         // and rejects any value sent for it. Writing the rate is also what keeps
         // a row explaining itself after the rate card changes.
         rate_applied: activity.passesPerUnit,
-        status: e.status,
+        status: STATUS_TO_DB[e.status],
         occurred_on: e.earnedOn,
         // Never null: the unique index includes this column, and in Postgres
         // two nulls are not equal, so a null here would let blank-reference

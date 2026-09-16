@@ -611,10 +611,36 @@ describe("importing pass activity", () => {
         challenge_code: "attend_event",
         units: 2,
         rate_applied: 5,
-        status: "valid",
+        status: "confirmed",
         occurred_on: "2026-09-04",
         external_ref: "Briefing",
       });
+    });
+
+    it("writes the status word this database uses, not the app's", async () => {
+      // The app says `valid`; the ledger says `confirmed`, which is the column
+      // default and what every row predating the importer carries. A reader
+      // would cope with either, but the table should not end up speaking two
+      // vocabularies — and a CHECK constraint on the three it already uses
+      // would reject `valid` outright.
+      await commit(
+        "cli-1,attend_event,1,2026-09-04,x",
+        "cli-1,attend_event,1,2026-09-05,y,",
+      );
+      expect(written[0].rows[0].status).toBe("confirmed");
+    });
+
+    it("keeps pending and void as they are, and they survive a round trip", async () => {
+      const p = await supabaseApi.previewUpload(
+        new File(
+          [`${HEAD},status\ncli-1,attend_event,1,2026-09-04,x,pending\n` +
+           `cli-1,attend_event,1,2026-09-05,y,void`],
+          "upload.csv",
+        ),
+        "camp-1",
+      );
+      await supabaseApi.commitUpload(p, "camp-1");
+      expect(written[0].rows.map((r) => r.status)).toEqual(["pending", "void"]);
     });
 
     it("sends the rate and not the total, because the total is a generated column", async () => {
