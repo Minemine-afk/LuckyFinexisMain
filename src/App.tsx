@@ -5,6 +5,8 @@ import { AppShell } from "./components/AppShell";
 import { Loading } from "./components/Loading";
 import { AdminPage } from "./pages/AdminPage";
 import { AdvisorPage } from "./pages/AdvisorPage";
+import { RecordDrawPage } from "./pages/RecordDrawPage";
+import { WinnersPage } from "./pages/WinnersPage";
 import { LoginPage } from "./pages/LoginPage";
 import { ProfilePage } from "./pages/ProfilePage";
 
@@ -53,6 +55,31 @@ export default function App() {
               <RequireRole roles={["admin"]}>
                 <AppShell>
                   <AdminPage />
+                </AppShell>
+              </RequireRole>
+            }
+          />
+
+          {/* Recording a draw is the one action that spends passes, so it is
+              the admin's alone. */}
+          <Route
+            path="/admin/draws"
+            element={
+              <RequireRole roles={["admin"]}>
+                <AppShell>
+                  <RecordDrawPage />
+                </AppShell>
+              </RequireRole>
+            }
+          />
+
+          {/* Past winners are firm-wide, so both roles read the same page. */}
+          <Route
+            path="/winners"
+            element={
+              <RequireRole roles={["advisor", "admin"]}>
+                <AppShell>
+                  <WinnersPage />
                 </AppShell>
               </RequireRole>
             }

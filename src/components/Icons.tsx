@@ -110,3 +110,12 @@ export const PlaneIcon = ({ size = 20 }: IconProps) => (
     <path d="M10.2 3.4a1.6 1.6 0 0 1 3.1 0L15 10l5.6 2.6a1.4 1.4 0 0 1-.6 2.7L13.8 14l-.5 4.3 2 1.7a1 1 0 0 1-.8 1.7l-2.5-.6-2.5.6a1 1 0 0 1-.8-1.7l2-1.7-.5-4.3-6.2 1.3a1.4 1.4 0 0 1-.6-2.7L9 10z" />
   </svg>
 );
+
+/** Prizes and results — the admin's record-a-draw screen and the winners page. */
+export const TrophyIcon = ({ size = 20 }: IconProps) => (
+  <svg {...base(size)}>
+    <path d="M7 4h10v5a5 5 0 0 1-10 0z" />
+    <path d="M7 6H4.5a2.5 2.5 0 0 0 2.5 4M17 6h2.5a2.5 2.5 0 0 1-2.5 4" />
+    <path d="M12 14v3M9 20h6M10 17h4" />
+  </svg>
+);

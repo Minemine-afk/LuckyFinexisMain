@@ -1282,3 +1282,21 @@ dialog.modal.wide {
     display: none;
   }
 }
+
+/* The add-a-winner row on the record-a-draw screen. Two fields and a button
+   side by side on a desktop, stacked on a phone — the button drops to its own
+   line rather than being squeezed next to a field too narrow to type a mobile
+   number into. */
+.winner-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(200px, 2fr) auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 12px;
+}
+.winner-form .field { margin: 0; }
+.winner-form .btn { white-space: nowrap; }
+
+@media (max-width: 720px) {
+  .winner-form { grid-template-columns: 1fr; align-items: stretch; }
+}

@@ -748,3 +748,160 @@ describe("importing pass activity", () => {
     });
   });
 });
+
+describe("recording a draw", () => {
+  /**
+   * Two writes with no transaction between them, so the **order** is the whole
+   * of the safety — and order is exactly what a test can pin down and a comment
+   * cannot enforce.
+   */
+  const CAMPAIGN = {
+    id: "camp-1", name: "ATW",
+    start_date: "2026-07-01", end_date: "2026-12-31", is_active: true,
+  };
+  const DRAWS = [
+    { id: "draw-aug", campaign_id: "camp-1", monthly_draw: "August",
+      draw_date: "2026-09-07", pass_type: "Blue", is_drawn: false },
+  ];
+
+  /** Every write, in the order it was made. */
+  let calls: { table: string; op: string; payload?: unknown; opts?: unknown }[];
+  /** Rows the `draws` update reports back — zero means row level security refused. */
+  let drawsUpdated: number;
+
+  const table = (name: string, list: unknown[], single: unknown = null) => {
+    let range: [number, number] | null = null;
+    const self: Record<string, unknown> = {};
+    for (const m of ["select", "eq", "in", "order", "limit", "not"]) self[m] = () => self;
+    self.range = (a: number, b: number) => { range = [a, b]; return self; };
+    self.maybeSingle = () => Promise.resolve({ data: single, error: null });
+    self.single = () => Promise.resolve({ data: single, error: null });
+
+    self.upsert = (payload: unknown, opts: unknown) => {
+      calls.push({ table: name, op: "upsert", payload, opts });
+      return { select: () => Promise.resolve({ data: [], error: null }) };
+    };
+    self.update = (payload: unknown) => {
+      calls.push({ table: name, op: "update", payload });
+      const chain: Record<string, unknown> = {};
+      chain.eq = () => chain;
+      chain.select = () =>
+        Promise.resolve({
+          data: Array.from({ length: drawsUpdated }, (_, i) => ({ id: `d${i}` })),
+          error: null,
+        });
+      return chain;
+    };
+    self.delete = () => {
+      const chain: Record<string, unknown> = {};
+      chain.eq = (_col: string, value: string) => {
+        calls.push({ table: name, op: "delete", payload: value });
+        return Promise.resolve({ data: null, error: null });
+      };
+      return chain;
+    };
+
+    self.then = (ok: (v: unknown) => unknown) =>
+      Promise.resolve({ data: range ? list.slice(range[0], range[1] + 1) : list, error: null })
+        .then(ok);
+    return self;
+  };
+
+  beforeEach(() => {
+    calls = [];
+    drawsUpdated = 1;
+    mocks.from.mockImplementation((t: string) => {
+      const rows: Record<string, [unknown[], unknown]> = {
+        campaigns: [[], CAMPAIGN],
+        draws: [DRAWS, null],
+        pass_ledger: [[], { date_updated: "2026-09-10" }],
+        clients: [[], null],
+        challenge_types: [[], null],
+        prizes_won: [[], null],
+      };
+      return table(t, ...(rows[t] ?? [[], null]));
+    });
+  });
+
+  it("writes the winners before it closes the draw", async () => {
+    // The order that matters. Every read of a prize gates on `is_drawn`, so
+    // prize rows written while the draw is open are invisible — a failure
+    // between the two leaves the campaign untouched and the call re-runnable.
+    // Closing first would spend the firm's passes with no winners to show.
+    await supabaseApi.recordDraw("camp-1", "draw-aug", [
+      { clientId: "cli-1", prize: "Dyson Airwrap" },
+    ]);
+
+    expect(calls.map((c) => `${c.table}.${c.op}`)).toEqual([
+      "prizes_won.upsert",
+      "draws.update",
+    ]);
+  });
+
+  it("maps a winner onto the prize table's own columns", async () => {
+    await supabaseApi.recordDraw("camp-1", "draw-aug", [
+      { clientId: "cli-1", prize: "  Dyson Airwrap  " },
+    ]);
+
+    expect(calls[0].payload).toEqual([
+      { draw_id: "draw-aug", client_id: "cli-1", prize_won: "Dyson Airwrap" },
+    ]);
+    expect(calls[1].payload).toEqual({ is_drawn: true });
+  });
+
+  it("asks the database to absorb a double-submit", async () => {
+    await supabaseApi.recordDraw("camp-1", "draw-aug", [
+      { clientId: "cli-1", prize: "Dyson Airwrap" },
+    ]);
+    expect(calls[0].opts).toMatchObject({
+      onConflict: "draw_id,client_id",
+      ignoreDuplicates: true,
+    });
+  });
+
+  it("closes a draw that had no winners at all", async () => {
+    // A draw nobody entered is still a draw that ran, and the passes in it are
+    // still spent. Skipping the close would leave them awaiting for ever.
+    await supabaseApi.recordDraw("camp-1", "draw-aug", []);
+    expect(calls.map((c) => `${c.table}.${c.op}`)).toEqual(["draws.update"]);
+  });
+
+  it("says so when the close silently affected nothing", async () => {
+    // Row level security refuses an UPDATE by matching no rows, not by
+    // erroring. Without checking the count, a consultant who reached this
+    // screen would be told the draw was recorded while nothing happened.
+    drawsUpdated = 0;
+    const err = await rejection(
+      supabaseApi.recordDraw("camp-1", "draw-aug", [
+        { clientId: "cli-1", prize: "Dyson Airwrap" },
+      ]),
+    );
+    expect(err.message).toMatch(/could not be closed/i);
+    expect(err.message).toMatch(/permission/i);
+  });
+
+  describe("undoing", () => {
+    it("reopens the draw before deleting the winners", async () => {
+      // The mirror image, and safe for the mirror reason: reopening first hides
+      // the result immediately, and a failure after it leaves prize rows nobody
+      // can see rather than a closed draw with its winners gone.
+      await supabaseApi.undoDraw("draw-aug");
+
+      expect(calls.map((c) => `${c.table}.${c.op}`)).toEqual([
+        "draws.update",
+        "prizes_won.delete",
+      ]);
+      expect(calls[0].payload).toEqual({ is_drawn: false });
+      expect(calls[1].payload).toBe("draw-aug");
+    });
+
+    it("does not delete anything when the reopen affected nothing", async () => {
+      drawsUpdated = 0;
+      const err = await rejection(supabaseApi.undoDraw("draw-aug"));
+
+      expect(err.message).toMatch(/could not be reopened/i);
+      // The important half: the winners are still there to try again with.
+      expect(calls.map((c) => c.op)).not.toContain("delete");
+    });
+  });
+});

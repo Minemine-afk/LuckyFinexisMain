@@ -349,6 +349,37 @@ export function livePasses(
   );
 }
 
+/**
+ * Passes of one type whose ballot is `month` — a draw's entrants.
+ *
+ * Selects on the ballot rather than on state, which is the difference that makes
+ * it useful: `livePasses` and `awaitingPasses` both stop counting the moment a
+ * draw is recorded, and the screen that records a draw needs the number *after*
+ * it has been recorded too — to say how many passes an undo would give back, and
+ * to keep showing who was in the draw once it is closed.
+ *
+ * Voided passes never entered anything, so they are left out. Pending ones are
+ * counted: a pass earned but not yet confirmed is still in the ballot for the
+ * month it was earned, and excluding it would understate the pool.
+ */
+export function ballotPasses(
+  events: PassEvent[],
+  passType: PassType,
+  month: DrawMonth,
+  activities: Activity[],
+  view: PassView,
+): number {
+  const types = typeOf(activities);
+  return sumPasses(
+    eligibleEvents(activities, events).filter(
+      (e) =>
+        types.get(e.activityId) === passType &&
+        e.status !== "void" &&
+        ballotMonth(e, passType, view) === month,
+    ),
+  );
+}
+
 /** Passes of one type sitting in a closed ballot whose draw has not been run. */
 export function awaitingPasses(
   events: PassEvent[],

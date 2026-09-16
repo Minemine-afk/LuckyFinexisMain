@@ -12,6 +12,7 @@ import {
   InfoIcon,
   NetworkIcon,
   SignOutIcon,
+  TrophyIcon,
   UploadIcon,
   UserIcon,
 } from "./Icons";
@@ -95,6 +96,20 @@ export function AppShell({ children }: { children: ReactNode }) {
               <span className="sr-only">Campaign data</span>
             </button>
           )}
+
+          {/* One trophy each, leading to the two ends of the same thing: the
+              admin records a result, everyone else reads it. */}
+          <button
+            type="button"
+            className="rail-btn"
+            title={viewer.role === "admin" ? "Record a draw" : "Past winners"}
+            onClick={() => navigate(viewer.role === "admin" ? "/admin/draws" : "/winners")}
+          >
+            <TrophyIcon />
+            <span className="sr-only">
+              {viewer.role === "admin" ? "Record a draw" : "Past winners"}
+            </span>
+          </button>
 
           <button
             type="button"

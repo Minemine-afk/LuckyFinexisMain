@@ -10,7 +10,7 @@ import {
   type UploadPreview,
 } from "../lib/ingest";
 import { isOncePerClient } from "../lib/campaignRules";
-import { awaitingPasses, livePasses, passView } from "../lib/passes";
+import { awaitingPasses, ballotPasses, livePasses, passView } from "../lib/passes";
 import { shortenName } from "../lib/format";
 import type {
   Activity,
@@ -26,7 +26,12 @@ import type {
   Role,
   Viewer,
 } from "../lib/types";
-import { ApiError, type CommitResult, type PortalApi } from "./api";
+import {
+  ApiError,
+  type CommitResult,
+  type DrawEntrant,
+  type PortalApi,
+} from "./api";
 
 /**
  * Supabase-backed provider, mapped onto the existing LuckyFinexis schema.
@@ -875,6 +880,140 @@ export const supabaseApi: PortalApi = {
       prize: p.prize_won,
       passType: asPassType(byId.get(p.draw_id)?.pass_type ?? null),
     }));
+  },
+
+  async getDrawEntrants(campaignId, drawId): Promise<DrawEntrant[]> {
+    const db = supabase();
+    const campaign = await this.getCampaign();
+    const draws = await this.getDraws(campaignId);
+
+    const draw = draws.find((d) => d.id === drawId);
+    if (!draw) throw new ApiError("That draw no longer exists.", 404);
+
+    const [clientRows, activities, ledgerRows] = await Promise.all([
+      fetchAll<ClientRow>(
+        (from, to) =>
+          db
+            .from("clients")
+            .select("id, advisor_id, client_name, client_mobile, client_email")
+            .order("client_name")
+            .order("id") // names are not unique, and paging needs a stable sort
+            .range(from, to),
+        "Could not load clients",
+      ),
+      this.getActivities(campaignId),
+      fetchAll<LedgerRow>(
+        (from, to) =>
+          db
+            .from("pass_ledger")
+            .select("*")
+            .eq("campaign_id", campaignId)
+            .order("id")
+            .range(from, to),
+        "Could not load pass activity",
+      ),
+    ]);
+
+    const drawMonths = new Map(draws.map((d) => [d.id, d.drawMonth]));
+    const view = passView(campaign, draws);
+
+    const byClient = new Map<string, PassEvent[]>();
+    for (const row of ledgerRows) {
+      const event = toPassEvent(row, drawMonths);
+      const list = byClient.get(event.clientId);
+      if (list) list.push(event);
+      else byClient.set(event.clientId, [event]);
+    }
+
+    return clientRows
+      .map(toClient)
+      .map((client) => ({
+        client,
+        passes: ballotPasses(
+          byClient.get(client.id) ?? [],
+          draw.passType,
+          draw.drawMonth,
+          activities,
+          view,
+        ),
+      }))
+      // Zero-pass clients stay in. The screen needs them to tell an unknown
+      // mobile number from a client who simply is not in this draw.
+      .sort((a, b) => b.passes - a.passes || a.client.fullName.localeCompare(b.client.fullName));
+  },
+
+  /**
+   * Two writes, and the order is the whole of the safety.
+   *
+   * Prize rows go in **first**, while the draw is still open. Every read gates
+   * on `is_drawn`, so until the flip those rows are invisible to everyone — a
+   * failure between the two statements leaves the campaign exactly as it was and
+   * the whole call can simply be repeated.
+   *
+   * The reverse order has no such property: flipping first would spend every
+   * pass in the ballot, and a failure after it would leave the firm looking at a
+   * closed draw with no winners in it.
+   */
+  async recordDraw(campaignId, drawId, winners): Promise<void> {
+    const db = supabase();
+
+    if (winners.length > 0) {
+      const { error } = await db.from("prizes_won").upsert(
+        winners.map((w) => ({
+          draw_id: drawId,
+          client_id: w.clientId,
+          prize_won: w.prize.trim(),
+        })),
+        // Absorbs a double-submit rather than listing a winner twice. The index
+        // this names is created by 0007.
+        { onConflict: "draw_id,client_id", ignoreDuplicates: true },
+      );
+      if (error) fail("Could not save the winners", error);
+    }
+
+    // `.select()` so the row count comes back, and it is checked. Row level
+    // security answers a denied UPDATE by matching no rows rather than by
+    // erroring, so without this a caller who is not an admin would be told the
+    // draw was recorded while nothing happened to it at all.
+    const { data, error } = await db
+      .from("draws")
+      .update({ is_drawn: true })
+      .eq("id", drawId)
+      .eq("campaign_id", campaignId)
+      .select("id");
+    if (error) fail("Could not close the draw", error);
+    if ((data?.length ?? 0) === 0) {
+      console.error(`[db] closing draw ${drawId} matched no rows`);
+      throw new ApiError(
+        "The winners were saved, but the draw could not be closed. You may not have " +
+          "permission to record draws — please contact your administrator.",
+      );
+    }
+  },
+
+  /** The mirror of `recordDraw`, and mirrored in its ordering too. */
+  async undoDraw(drawId): Promise<void> {
+    const db = supabase();
+
+    // Reopen first: this is what hides the result and returns the passes. A
+    // failure after it leaves prize rows nobody can see, which is harmless and
+    // re-runnable — the same shape of partial failure as recording.
+    const { data, error: reopen } = await db
+      .from("draws")
+      .update({ is_drawn: false })
+      .eq("id", drawId)
+      .select("id");
+    if (reopen) fail("Could not reopen the draw", reopen);
+    if ((data?.length ?? 0) === 0) {
+      console.error(`[db] reopening draw ${drawId} matched no rows`);
+      throw new ApiError(
+        "The draw could not be reopened. You may not have permission to record " +
+          "draws — please contact your administrator.",
+      );
+    }
+
+    const { error } = await db.from("prizes_won").delete().eq("draw_id", drawId);
+    if (error) fail("Could not remove the recorded winners", error);
   },
 
   async previewUpload(file, campaignId): Promise<UploadPreview> {

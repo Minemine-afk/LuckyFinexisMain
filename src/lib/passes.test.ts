@@ -3,6 +3,7 @@ import * as seed from "../data/mock";
 import {
   awaitingPasses,
   ballotFor,
+  ballotPasses,
   ballotMonth,
   buildDrawHistory,
   buildPassBlocks,
@@ -359,5 +360,83 @@ describe("current draw month", () => {
 
   it("derives the draw month from the date the pass was earned", () => {
     expect(drawMonthOf("2026-08-15")).toBe("2026-08");
+  });
+});
+
+describe("the passes in one ballot", () => {
+  /**
+   * What the record-a-draw screen counts. The distinction from `livePasses` and
+   * `awaitingPasses` is that this one does not stop counting when the draw is
+   * run — the screen has to say how many passes an undo would give back, and
+   * has to keep showing who was in a draw once it is closed.
+   */
+  const blue = card();
+  const gold = card({ passType: "gold" });
+
+  it("counts the passes whose ballot is that month", () => {
+    const v = view("2026-08", [draw("blue", "2026-07", false)]);
+    const events = [
+      event("2026-07", 5, { id: "e1" }),
+      event("2026-07", 3, { id: "e2" }),
+      event("2026-08", 7, { id: "e3" }),
+    ];
+    expect(ballotPasses(events, "blue", "2026-07", blue, v)).toBe(8);
+    expect(ballotPasses(events, "blue", "2026-08", blue, v)).toBe(7);
+  });
+
+  it("keeps counting after the draw has been run, unlike the other two", () => {
+    const events = [event("2026-07", 5, { id: "e1" }), event("2026-07", 3, { id: "e2" })];
+    const open = view("2026-08", [draw("blue", "2026-07", false)]);
+    const run = view("2026-08", [draw("blue", "2026-07", true)]);
+
+    expect(awaitingPasses(events, "blue", blue, open)).toBe(8);
+    expect(awaitingPasses(events, "blue", blue, run)).toBe(0);
+    expect(livePasses(events, "blue", blue, run)).toBe(0);
+    // The number an undo would give back, which is the whole point of it.
+    expect(ballotPasses(events, "blue", "2026-07", blue, run)).toBe(8);
+  });
+
+  it("leaves out voided passes, which never entered anything", () => {
+    const v = view("2026-08", [draw("blue", "2026-07", false)]);
+    const events = [
+      event("2026-07", 5, { id: "e1" }),
+      event("2026-07", 3, { id: "e2", status: "void" }),
+    ];
+    expect(ballotPasses(events, "blue", "2026-07", blue, v)).toBe(5);
+  });
+
+  it("counts a pending pass, which is in the ballot for the month it was earned", () => {
+    const v = view("2026-08", [draw("blue", "2026-07", false)]);
+    const events = [event("2026-07", 4, { status: "pending" })];
+    expect(ballotPasses(events, "blue", "2026-07", blue, v)).toBe(4);
+  });
+
+  it("pools gold into the campaign-close ballot, not the month it was earned", () => {
+    const v = view("2026-08", [draw("gold", "2026-12", false)]);
+    const events = [
+      event("2026-07", 21, { id: "g1" }),
+      event("2026-08", 21, { id: "g2" }),
+    ];
+    expect(ballotPasses(events, "gold", "2026-07", gold, v)).toBe(0);
+    expect(ballotPasses(events, "gold", "2026-12", gold, v)).toBe(42);
+  });
+
+  it("ignores passes of the other type entirely", () => {
+    const v = view("2026-08", [draw("blue", "2026-07", false)]);
+    const events = [event("2026-07", 5)];
+    expect(ballotPasses(events, "gold", "2026-07", blue, v)).toBe(0);
+  });
+
+  it("applies the once-per-client cap, like every other total", () => {
+    const capped = card({ oncePerClient: true, passesPerUnit: 3 });
+    const v = view("2026-07");
+    const events = [
+      event("2026-07", 3, { id: "t1", units: 1 }),
+      event("2026-07", 3, { id: "t2", units: 1 }),
+    ];
+    expect(ballotPasses(events, "blue", "2026-07", capped, v)).toBe(3);
+    expect(ballotPasses(events, "blue", "2026-07", capped, v)).toBe(
+      livePasses(events, "blue", capped, v),
+    );
   });
 });

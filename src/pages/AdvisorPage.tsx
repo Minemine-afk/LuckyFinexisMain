@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { CampaignDetailsModal } from "../components/CampaignDetailsModal";
 import { ClientStatementPanel } from "../components/ClientStatementPanel";
@@ -6,7 +7,7 @@ import { RefreshIcon, SearchIcon } from "../components/Icons";
 import { Alert, EmptyState, Loading } from "../components/Loading";
 import { Modal } from "../components/Modal";
 import { api } from "../data";
-import { formatMobile, monthAndYear, monthName, passTypeLabel, shortDate } from "../lib/format";
+import { formatMobile, monthAndYear, monthName, shortDate } from "../lib/format";
 import { ballotFor, passView } from "../lib/passes";
 import { useAsync, useRefreshOnFocus } from "../lib/useAsync";
 import type { ClientStatement } from "../lib/types";
@@ -21,10 +22,10 @@ import type { ClientStatement } from "../lib/types";
  */
 export function AdvisorPage() {
   const { viewer } = useAuth();
+  const navigate = useNavigate();
   const advisorId = viewer?.advisorId ?? "";
 
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [winnersMonth, setWinnersMonth] = useState<string | null>(null);
   const [openClientId, setOpenClientId] = useState<string | null>(null);
 
   const page = useAsync(async () => {
@@ -41,11 +42,6 @@ export function AdvisorPage() {
     if (!openClientId || !page.data) return null;
     return api.getClientStatement(openClientId, page.data.campaign.id);
   }, [openClientId, page.data?.campaign.id]);
-
-  const winners = useAsync(async () => {
-    if (!winnersMonth || !page.data) return [];
-    return api.getWinners(page.data.campaign.id, winnersMonth);
-  }, [winnersMonth, page.data?.campaign.id]);
 
   // Pass counts get read out to clients, so the page should not be showing
   // whatever the database held when it was opened this morning.
@@ -94,13 +90,15 @@ export function AdvisorPage() {
         <div className="toolbar">
           <span className="label">View past winners:</span>
           <div className="chips">
+            {/* These lead to the winners page rather than opening a copy of
+                it here. One rendering of the firm's winners, one place the
+                privacy note lives. */}
             {drawnMonths.map((month) => (
               <button
                 key={month}
                 type="button"
                 className="chip"
-                aria-pressed={winnersMonth === month}
-                onClick={() => setWinnersMonth(month)}
+                onClick={() => navigate("/winners")}
               >
                 {monthName(month)}
               </button>
@@ -245,47 +243,6 @@ export function AdvisorPage() {
         )}
       </Modal>
 
-      <Modal
-        open={winnersMonth !== null}
-        onClose={() => setWinnersMonth(null)}
-        title={winnersMonth ? `${monthName(winnersMonth)} draw winners` : "Winners"}
-      >
-        {winners.loading && <Loading />}
-        {winners.error && <Alert kind="err">{winners.error}</Alert>}
-        {winners.data && winners.data.length === 0 && (
-          <EmptyState title="No winners published for this month yet" />
-        )}
-        {winners.data && winners.data.length > 0 && (
-          <div className="tablewrap">
-            <table className="ptable">
-              <thead>
-                <tr>
-                  <th scope="col">Winner</th>
-                  <th scope="col">Prize</th>
-                  <th scope="col">Pass Type</th>
-                </tr>
-              </thead>
-              <tbody>
-                {winners.data.map((w) => (
-                  <tr key={w.id}>
-                    <td className="name">{w.displayName}</td>
-                    <td>{w.prize}</td>
-                    <td>
-                      <span className={`badge ${w.passType}`}>
-                        {passTypeLabel(w.passType)}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 12 }}>
-              Winners are listed by first name and last initial, because this list is
-              visible to every consultant in the firm.
-            </p>
-          </div>
-        )}
-      </Modal>
     </div>
   );
 }

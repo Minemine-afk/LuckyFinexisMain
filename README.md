@@ -10,7 +10,7 @@ whole portal can be clicked through before a Supabase project exists.
 ```bash
 npm install
 npm run dev          # http://localhost:5173, demo data, no backend needed
-npm test             # 133 tests over the pass arithmetic, CSV parser, ingest rules and provider
+npm test             # 171 tests over the pass arithmetic, CSV parser, ingest rules and providers
 npm run build        # tsc -b && vite build -> dist/
 ```
 
@@ -20,6 +20,8 @@ npm run build        # tsc -b && vite build -> dist/
 |---|---|---|
 | **Consultant** | `/clients` | Every client of theirs holding passes — name, mobile, email, live gold and blue totals, a Winner badge on anyone who has taken a draw — with the full breakdown behind the magnifier icon, campaign details, and past monthly winners. |
 | **Admin** | `/admin` | CSV upload for pass activity, with a dry run before anything is written. |
+| **Admin** | `/admin/draws` | Record the result of a draw — winners by mobile number, and what they won. |
+| **Both** | `/winners` | Every draw that has been run, month by month, across the firm. |
 | **Both** | `/profile` | Your own account details, and changing your password. Reached from the person icon in the rail. |
 
 One sign-in form serves both. Which portal you land on is decided by the role on your
@@ -193,6 +195,35 @@ Worth knowing before writing an importer or loading by hand:
 `supabase/migrations/0005_pass_ledger_writes.sql` is what makes the importer able to write, and
 `supabase/checks/ledger-shape.sql` is a read-only file of queries that confirm a load landed as
 an event log rather than as a snapshot. Both carry their own instructions.
+
+## Recording a draw
+
+Draws are run offline; the portal records the outcome. `/admin/draws` takes the winners of one
+draw — identified by **mobile number**, because that is what comes back on a draw sheet — and
+publishes them.
+
+Publishing is two writes, and **the order is the whole of the safety**, because there is no
+transaction spanning them:
+
+1. The prize rows go into `prizes_won` while the draw is still open. Every read of a prize
+   gates on `is_drawn`, so until step 2 those rows are invisible to everyone. A failure here
+   leaves the campaign exactly as it was.
+2. `draws.is_drawn` is set true. **This is what spends the passes** — every pass in that ballot
+   goes from `awaiting` to `drawn`, and each entrant sees either "Won — *prize*" or
+   "Unsuccessful".
+
+Reversed, a failure between the two would spend the firm's passes with no winners to show for
+it. `undoDraw` mirrors the same reasoning in the opposite direction: reopen first, then delete.
+
+A mobile number that matches **two** clients is refused rather than guessed at — the same rule
+as the importer's `client_ref`, for the same reason. A client holding no passes in the draw is
+refused too: they were not entered into it, so a number that resolves to them is a typo that
+happens to hit a real person.
+
+Undo reopens the draw and removes its winners. It is the one place the app deletes anything,
+and that is deliberate: `pass_ledger` records things that happened and is corrected by voiding
+rows, while `prizes_won` records a *published result*, and a result typed in wrongly was never
+a result. See `supabase/migrations/0007_draw_results.sql`.
 
 ## Architecture
 
@@ -462,19 +493,12 @@ and vice versa.
 
 Still to come, in rough order:
 
-1. **Admin: record a draw** — draws are run offline and the result recorded. The app reads
-   `draws.is_drawn` and `prizes_won` correctly, but has no screen to set them: both are
-   entered in Supabase for now. The screen is a short one — pick the winner, name the prize,
-   mark the draw drawn — and marking it drawn is what uses up every pass entered into it, so
-   it needs saying plainly on the button. This is the most visible gap: until a draw is
-   recorded, everyone who entered it sits in `awaiting`, looking at passes with no outcome.
-2. **Admin: campaign artwork and winners** — the mockups have an admin uploading the campaign
-   details image and publishing each month's winners. Both are read correctly by the
-   consultant view; neither has an editor yet. Until artwork is uploaded, the details pop-up
-   falls back to the campaign's earning rules rendered from the activity table.
-3. **Account provisioning** — invite, first-login password set, and password reset.
-4. **Sub-admin role** — a restricted admin that can import data but not manage campaigns.
-5. **Error monitoring** — the error boundary keeps a crash from blanking the page, but nobody
+1. **Admin: campaign artwork** — the mockups have an admin uploading the campaign
+   details image. It is read correctly by the consultant view but has no editor yet, so the
+   details pop-up falls back to the campaign's earning rules rendered from the activity table.
+2. **Account provisioning** — invite, first-login password set, and password reset.
+3. **Sub-admin role** — a restricted admin that can import data but not manage campaigns.
+4. **Error monitoring** — the error boundary keeps a crash from blanking the page, but nobody
    is told it happened. Until something reports them, a crash is only ever discovered by the
    person it happened to.
 

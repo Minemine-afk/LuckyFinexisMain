@@ -8,7 +8,8 @@ import {
   type IngestContext,
   type UploadPreview,
 } from "../lib/ingest";
-import { awaitingPasses, livePasses, passView } from "../lib/passes";
+import { awaitingPasses, ballotPasses, livePasses, passView } from "../lib/passes";
+import { shortenName } from "../lib/format";
 import type {
   Activity,
   AdvisorClientRow,
@@ -19,11 +20,18 @@ import type {
   DrawWinner,
   PassEvent,
 } from "../lib/types";
-import { ApiError, type CommitResult, type PortalApi } from "./api";
+import {
+  ApiError,
+  type CommitResult,
+  type DrawEntrant,
+  type PortalApi,
+} from "./api";
 import * as seed from "./mock";
 
 const SESSION_KEY = "luckyfinexis.demo-session";
 const LEDGER_KEY = "luckyfinexis.demo-ledger";
+const DRAWS_KEY = "luckyfinexis.demo-draws";
+const WINNERS_KEY = "luckyfinexis.demo-winners";
 /** Any password is accepted in demo mode; this is the one the login screen shows. */
 const DEMO_PASSWORD = "demo1234";
 
@@ -35,17 +43,26 @@ const DEMO_PASSWORD = "demo1234";
  */
 let ledger: PassEvent[];
 
-const loadLedger = (): PassEvent[] => {
-  const stored = readStore("local", LEDGER_KEY);
+/**
+ * Draws and winners are mutable for the same reason the ledger is: recording a
+ * draw is the one action in the app that spends passes, and a demo where the
+ * consultant's totals do not visibly drop afterwards is demonstrating nothing.
+ */
+let draws: Draw[];
+let winners: DrawWinner[];
+
+/** Read a persisted demo table, falling back to the seed if it is missing or corrupt. */
+function loadTable<T>(key: string, fallback: T[]): T[] {
+  const stored = readStore("local", key);
   if (stored) {
     try {
-      return JSON.parse(stored) as PassEvent[];
+      return JSON.parse(stored) as T[];
     } catch {
       // Corrupt or stale demo data falls back to the seed.
     }
   }
-  return [...seed.passEvents];
-};
+  return [...fallback];
+}
 
 /**
  * Storage access itself can throw, not just return null — a browser with site
@@ -74,7 +91,19 @@ const saveLedger = (next: PassEvent[]): void => {
   writeStore("local", LEDGER_KEY, JSON.stringify(next));
 };
 
-ledger = loadLedger();
+const saveDraws = (next: Draw[]): void => {
+  draws = next;
+  writeStore("local", DRAWS_KEY, JSON.stringify(next));
+};
+
+const saveWinners = (next: DrawWinner[]): void => {
+  winners = next;
+  writeStore("local", WINNERS_KEY, JSON.stringify(next));
+};
+
+ledger = loadTable(LEDGER_KEY, seed.passEvents);
+draws = loadTable(DRAWS_KEY, seed.draws);
+winners = loadTable(WINNERS_KEY, seed.drawWinners);
 
 const delay = <T,>(value: T): Promise<T> =>
   new Promise((resolve) => setTimeout(() => resolve(value), 120));
@@ -165,11 +194,11 @@ export const mockApi: PortalApi = {
 
   async getAdvisorClients(advisorId, campaignId): Promise<AdvisorClientRow[]> {
     const mine = seed.clients.filter((c) => c.advisorId === advisorId);
-    const draws = seed.draws.filter((d) => d.campaignId === campaignId);
-    const view = passView(seed.campaign, draws);
-    const drawnIds = new Set(draws.filter((d) => d.isDrawn).map((d) => d.id));
+    const inCampaign = draws.filter((d) => d.campaignId === campaignId);
+    const view = passView(seed.campaign, inCampaign);
+    const drawnIds = new Set(inCampaign.filter((d) => d.isDrawn).map((d) => d.id));
     const winnerIds = new Set(
-      seed.drawWinners.filter((w) => drawnIds.has(w.drawId)).map((w) => w.clientId),
+      winners.filter((w) => drawnIds.has(w.drawId)).map((w) => w.clientId),
     );
     const rows = mine
       .map((client) => {
@@ -200,19 +229,17 @@ export const mockApi: PortalApi = {
   async getClientStatement(clientId, campaignId): Promise<ClientStatement> {
     const client = seed.clients.find((c) => c.id === clientId);
     if (!client) throw new ApiError("Client not found.", 404);
-    const drawnIds = new Set(seed.draws.filter((d) => d.isDrawn).map((d) => d.id));
+    const drawnIds = new Set(draws.filter((d) => d.isDrawn).map((d) => d.id));
     return delay({
       client,
       events: ledger.filter((e) => e.clientId === clientId && e.campaignId === campaignId),
-      winners: seed.drawWinners.filter(
-        (w) => w.clientId === clientId && drawnIds.has(w.drawId),
-      ),
+      winners: winners.filter((w) => w.clientId === clientId && drawnIds.has(w.drawId)),
     });
   },
 
   async getDraws(campaignId): Promise<Draw[]> {
     return delay(
-      seed.draws
+      draws
         .filter((d) => d.campaignId === campaignId)
         .sort((a, b) => a.drawMonth.localeCompare(b.drawMonth)),
     );
@@ -222,11 +249,75 @@ export const mockApi: PortalApi = {
     // A month can hold a gold draw and a blue draw, so this is every winner of
     // every draw that has actually been run in that month.
     const ids = new Set(
-      seed.draws
+      draws
         .filter((d) => d.campaignId === campaignId && d.drawMonth === drawMonth && d.isDrawn)
         .map((d) => d.id),
     );
-    return delay(seed.drawWinners.filter((w) => ids.has(w.drawId)));
+    return delay(winners.filter((w) => ids.has(w.drawId)));
+  },
+
+  async getDrawEntrants(campaignId, drawId): Promise<DrawEntrant[]> {
+    const inCampaign = draws.filter((d) => d.campaignId === campaignId);
+    const draw = inCampaign.find((d) => d.id === drawId);
+    if (!draw) throw new ApiError("That draw no longer exists.", 404);
+
+    const view = passView(seed.campaign, inCampaign);
+    return delay(
+      seed.clients
+        .map((client) => ({
+          client,
+          passes: ballotPasses(
+            ledger.filter((e) => e.clientId === client.id && e.campaignId === campaignId),
+            draw.passType,
+            draw.drawMonth,
+            seed.activities,
+            view,
+          ),
+        }))
+        .sort(
+          (a, b) => b.passes - a.passes || a.client.fullName.localeCompare(b.client.fullName),
+        ),
+    );
+  },
+
+  async recordDraw(campaignId, drawId, entries): Promise<void> {
+    const draw = draws.find((d) => d.id === drawId && d.campaignId === campaignId);
+    if (!draw) throw new ApiError("That draw no longer exists.", 404);
+
+    // Replaces rather than appends, mirroring the unique index on
+    // (draw_id, client_id) that makes a second submit a no-op against Supabase.
+    const others = winners.filter((w) => w.drawId !== drawId);
+    saveWinners([
+      ...others,
+      ...entries.map((e, i) => ({
+        id: `win-${drawId}-${i}`,
+        drawId,
+        drawMonth: draw.drawMonth,
+        clientId: e.clientId,
+        displayName: shortenName(
+          seed.clients.find((c) => c.id === e.clientId)?.fullName ?? "A client",
+        ),
+        prize: e.prize.trim(),
+        passType: draw.passType,
+      })),
+    ]);
+
+    saveDraws(
+      draws.map((d) =>
+        d.id === drawId
+          ? { ...d, isDrawn: true, drawnAt: new Date().toISOString().slice(0, 10) }
+          : d,
+      ),
+    );
+    await delay(null);
+  },
+
+  async undoDraw(drawId): Promise<void> {
+    saveDraws(
+      draws.map((d) => (d.id === drawId ? { ...d, isDrawn: false, drawnAt: null } : d)),
+    );
+    saveWinners(winners.filter((w) => w.drawId !== drawId));
+    await delay(null);
   },
 
   async previewUpload(file, campaignId): Promise<UploadPreview> {
@@ -253,6 +344,10 @@ export const mockApi: PortalApi = {
 /** Backs the "reset demo data" control on the admin page. */
 export const resetMockLedger = (): void => {
   saveLedger([...seed.passEvents]);
+  // Draws and winners too, or a demo that has recorded a draw cannot be put
+  // back — the passes would stay spent however many times you reset.
+  saveDraws([...seed.draws]);
+  saveWinners([...seed.drawWinners]);
 };
 
 export const DEMO_ACCOUNTS = seed.demoViewers.map((v) => ({
