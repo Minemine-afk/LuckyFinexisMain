@@ -1121,6 +1121,46 @@ dialog.modal.wide {
   padding: 1px 5px;
 }
 
+/* ---------------------------------------------------------------- account page */
+
+/* Two independent changes, side by side on a wide screen and stacked on a
+   narrow one. Deliberately not one long form: they are separate decisions with
+   separate consequences, and submitting one must not imply the other. */
+.account-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+
+.account-grid .card-title {
+  font-size: 17px;
+  margin: 0 0 6px;
+}
+
+.account-grid .card-note {
+  margin: 0 0 18px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+
+.account-grid .field input:disabled {
+  background: var(--surface-2);
+  color: var(--ink-3);
+  cursor: not-allowed;
+}
+
+.account-grid .hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.account-grid .alert {
+  margin-bottom: 14px;
+}
+
 /* ---------------------------------------------------------------- account bar */
 
 /* Who you are signed in as, and the way out. The rail's icon alone made ending

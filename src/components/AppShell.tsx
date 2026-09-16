@@ -44,7 +44,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     { key: "alerts", label: "Notifications", icon: <BellIcon /> },
     { key: "events", label: "Events", icon: <CalendarIcon /> },
     { key: "commissions", label: "Commissions", icon: <DollarIcon /> },
-    { key: "profile", label: "Profile", icon: <UserIcon /> },
     { key: "network", label: "Network", icon: <NetworkIcon /> },
   ];
 
@@ -94,6 +93,16 @@ export function AppShell({ children }: { children: ReactNode }) {
               <span className="sr-only">Campaign data</span>
             </button>
           )}
+
+          <button
+            type="button"
+            className="rail-btn"
+            title="Your account"
+            onClick={() => navigate("/profile")}
+          >
+            <UserIcon />
+            <span className="sr-only">Your account</span>
+          </button>
 
           {placeholders.map((p) => (
             <button

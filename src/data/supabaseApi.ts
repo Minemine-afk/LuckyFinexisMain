@@ -328,6 +328,37 @@ async function resolveOrEndSession(
   }
 }
 
+/* ---------- account changes ---------- */
+
+/**
+ * Prove the person at the keyboard knows the current password, and return the
+ * email they are signed in as.
+ *
+ * Supabase will change a password or a sign-in email on the strength of a
+ * session alone. That makes an unattended laptop enough to lock a consultant
+ * out of their own client book, so this is the check Supabase does not make.
+ *
+ * Signing in again does not disturb the existing session; a wrong password
+ * returns an error and leaves it alone.
+ */
+async function reauthenticate(currentPassword: string): Promise<string> {
+  const db = supabase();
+  const { data } = await db.auth.getSession();
+  const email = data.session?.user.email;
+  if (!email) {
+    throw new ApiError("Your session has ended. Please sign in again.");
+  }
+
+  const { error } = await db.auth.signInWithPassword({ email, password: currentPassword });
+  if (error) {
+    // Naming the reason is safe here, unlike on the login screen: whoever is
+    // asking is already signed in as this account, so there is nothing to
+    // discover.
+    throw new ApiError("That is not your current password.");
+  }
+  return email;
+}
+
 /* ---------- paging ---------- */
 
 /**
@@ -463,6 +494,43 @@ export const supabaseApi: PortalApi = {
     });
 
     return () => data.subscription.unsubscribe();
+  },
+
+  async changePassword(currentPassword, newPassword) {
+    await reauthenticate(currentPassword);
+
+    const { error } = await supabase().auth.updateUser({ password: newPassword });
+    if (error) {
+      console.error("[auth] password change failed:", error.message);
+      // GoTrue's own validation messages are written for the person reading
+      // them — "Password should be at least 6 characters" — unlike Postgres
+      // errors, so they are passed through rather than swallowed.
+      throw new ApiError(error.message, error.status);
+    }
+  },
+
+  async changeEmail(currentPassword, newEmail) {
+    const current = await reauthenticate(currentPassword);
+    const next = newEmail.trim();
+    if (next.toLowerCase() === current.toLowerCase()) {
+      throw new ApiError("That is already your sign-in email.");
+    }
+
+    // Land them back on the page they started from. The URL has to be in the
+    // project's redirect allow-list or Supabase refuses it. Guarded because
+    // this provider has no business assuming a browser — the same code is meant
+    // to be reusable from a Pages Function, where `window` does not exist and
+    // Supabase falls back to the project's Site URL.
+    const emailRedirectTo =
+      typeof window === "undefined" ? undefined : `${window.location.origin}/profile`;
+
+    const { error } = await supabase().auth.updateUser({ email: next }, { emailRedirectTo });
+    if (error) {
+      console.error("[auth] email change failed:", error.message);
+      throw new ApiError(error.message, error.status);
+    }
+
+    return { sentTo: next };
   },
 
   async getCampaign(): Promise<Campaign> {

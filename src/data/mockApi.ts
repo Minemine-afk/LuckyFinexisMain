@@ -131,6 +131,29 @@ export const mockApi: PortalApi = {
     return seed.demoViewers.find((v) => v.userId === id) ?? null;
   },
 
+  async changePassword(currentPassword) {
+    // Demo sign-in accepts any password, so there is no stored one to check
+    // against. The shape of the call is still exercised — an empty current
+    // password is refused, as it would be against Supabase.
+    if (!currentPassword) throw new ApiError("Enter your current password.");
+    await delay(null);
+  },
+
+  async changeEmail(currentPassword, newEmail) {
+    if (!currentPassword) throw new ApiError("Enter your current password.");
+
+    const id = readStore("session", SESSION_KEY);
+    const viewer = seed.demoViewers.find((v) => v.userId === id);
+    if (viewer && newEmail.trim().toLowerCase() === viewer.email.toLowerCase()) {
+      throw new ApiError("That is already your sign-in email.");
+    }
+
+    // Deliberately does not change the email. A real change waits on a
+    // confirmation link, and a demo that switched it immediately would
+    // rehearse the wrong thing.
+    return delay({ sentTo: newEmail.trim() });
+  },
+
   onSessionChange(handler) {
     // Demo sessions never expire, so there is nothing to poll. What can still
     // happen is a sign-out in another tab, which the storage event carries.

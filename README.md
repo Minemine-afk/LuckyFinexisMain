@@ -20,6 +20,7 @@ npm run build        # tsc -b && vite build -> dist/
 |---|---|---|
 | **Consultant** | `/clients` | Every client of theirs holding passes — name, mobile, email, live gold and blue totals, a Winner badge on anyone who has taken a draw — with the full breakdown behind the magnifier icon, campaign details, and past monthly winners. |
 | **Admin** | `/admin` | CSV upload for pass activity, with a dry run before anything is written. |
+| **Both** | `/profile` | Your own account: the sign-in email and the password. Reached from the person icon in the rail. |
 
 One sign-in form serves both. Which portal you land on is decided by the role on your
 record, not by the form you used.
@@ -202,6 +203,37 @@ attributes; scripts get no such exemption.
 
 Production builds emit no source map. Pages serves `dist/` wholesale, so an emitted `.map`
 is published next to the bundle and hands any visitor the full annotated source.
+
+### Changing your own account
+
+`/profile` is the only page in the portal that writes anything, and it writes nothing to the
+campaign — only to the signed-in user's own auth record.
+
+**Both changes require the current password.** Supabase will change a password or a sign-in
+email on the strength of a session alone, which makes an unattended laptop enough to take a
+consultant's account away from them. `reauthenticate` in `src/data/supabaseApi.ts` signs in
+again with the current password first, and nothing is written if that fails. Naming the
+reason — "that is not your current password" — is safe here in a way it is not on the login
+screen: whoever is asking is already signed in as this account.
+
+Changing the email does not change it. Supabase sends a confirmation link and the current
+address keeps working until it is followed; with *secure email change* enabled (the default)
+a link goes to the current address too and both must be confirmed. The page says so rather
+than implying the change has happened.
+
+**Two things need to be right in the Supabase project** for the email half to work:
+
+1. `https://<your-pages-domain>/profile` is in **Authentication → URL Configuration →
+   Redirect URLs**. Supabase refuses a redirect that is not on the list.
+2. Email templates and SMTP are working. The built-in sender is rate-limited and not meant
+   for production.
+
+`advisors.email` is not touched, and nothing in the app reads it — the sign-in identity lives
+in `auth.users`. If you keep that column for your own records it will drift.
+
+The minimum password length is set in `ProfilePage.tsx`, not in Supabase, and is stricter
+than Supabase's own floor. The server is still the authority; this just fails faster and with
+a better message.
 
 ### Paging
 

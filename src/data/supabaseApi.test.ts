@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => {
     signOut: vi.fn(),
     getSession: vi.fn(),
     onAuthStateChange: vi.fn(),
+    updateUser: vi.fn(),
   };
   return { maybeSingle, from, auth, client: { auth, from } };
 });
@@ -165,6 +166,93 @@ describe("resuming a session on page load", () => {
       error: { message: "storage unavailable" },
     });
     await expect(supabaseApi.currentViewer()).rejects.toThrow(/Could not read your session/);
+  });
+});
+
+describe("changing your own account", () => {
+  const SESSION = { data: { session: { user: user() } }, error: null };
+
+  beforeEach(() => {
+    mocks.auth.getSession.mockResolvedValue(SESSION);
+    mocks.auth.signInWithPassword.mockResolvedValue({ data: { user: user() }, error: null });
+    mocks.auth.updateUser.mockResolvedValue({ data: { user: user() }, error: null });
+  });
+
+  it("proves the current password before setting a new one", async () => {
+    await supabaseApi.changePassword("old-one", "a-much-longer-new-one");
+
+    expect(mocks.auth.signInWithPassword).toHaveBeenCalledWith({
+      email: "amy@finexis.example",
+      password: "old-one",
+    });
+    expect(mocks.auth.updateUser).toHaveBeenCalledWith({ password: "a-much-longer-new-one" });
+  });
+
+  it("does not change the password when the current one is wrong", async () => {
+    mocks.auth.signInWithPassword.mockResolvedValue({
+      data: { user: null },
+      error: { message: "Invalid login credentials", status: 400 },
+    });
+
+    await expect(supabaseApi.changePassword("wrong", "a-much-longer-new-one")).rejects.toThrow(
+      /not your current password/i,
+    );
+    // The point of the gate: nothing was written.
+    expect(mocks.auth.updateUser).not.toHaveBeenCalled();
+  });
+
+  it("proves the current password before changing the sign-in email too", async () => {
+    vi.stubGlobal("window", { location: { origin: "https://luckyfinexismain.pages.dev" } });
+    try {
+      const result = await supabaseApi.changeEmail("old-one", "  New@Finexis.example  ");
+
+      expect(mocks.auth.signInWithPassword).toHaveBeenCalled();
+      expect(mocks.auth.updateUser).toHaveBeenCalledWith(
+        { email: "New@Finexis.example" },
+        { emailRedirectTo: "https://luckyfinexismain.pages.dev/profile" },
+      );
+      expect(result.sentTo).toBe("New@Finexis.example");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("works without a browser, for reuse outside one", async () => {
+    // No window stubbed: the redirect is simply omitted and Supabase falls back
+    // to the project's Site URL.
+    await supabaseApi.changeEmail("old-one", "new@finexis.example");
+    expect(mocks.auth.updateUser).toHaveBeenCalledWith(
+      { email: "new@finexis.example" },
+      { emailRedirectTo: undefined },
+    );
+  });
+
+  it("does not change the email when the current password is wrong", async () => {
+    mocks.auth.signInWithPassword.mockResolvedValue({
+      data: { user: null },
+      error: { message: "Invalid login credentials", status: 400 },
+    });
+
+    await expect(supabaseApi.changeEmail("wrong", "new@finexis.example")).rejects.toThrow(
+      /not your current password/i,
+    );
+    expect(mocks.auth.updateUser).not.toHaveBeenCalled();
+  });
+
+  it("refuses an email that is already the one in use, whatever its case", async () => {
+    await expect(supabaseApi.changeEmail("old-one", "AMY@finexis.EXAMPLE")).rejects.toThrow(
+      /already your sign-in email/i,
+    );
+    expect(mocks.auth.updateUser).not.toHaveBeenCalled();
+  });
+
+  it("refuses to act at all when the session has gone", async () => {
+    mocks.auth.getSession.mockResolvedValue({ data: { session: null }, error: null });
+
+    await expect(supabaseApi.changePassword("old-one", "a-much-longer-new-one")).rejects.toThrow(
+      /session has ended/i,
+    );
+    expect(mocks.auth.signInWithPassword).not.toHaveBeenCalled();
   });
 });
 

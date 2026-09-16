@@ -6,6 +6,7 @@ import { Loading } from "./components/Loading";
 import { AdminPage } from "./pages/AdminPage";
 import { AdvisorPage } from "./pages/AdvisorPage";
 import { LoginPage } from "./pages/LoginPage";
+import { ProfilePage } from "./pages/ProfilePage";
 
 /** "/" sends you to whichever portal your role owns. */
 function HomeRedirect() {
@@ -52,6 +53,18 @@ export default function App() {
               <RequireRole roles={["admin"]}>
                 <AppShell>
                   <AdminPage />
+                </AppShell>
+              </RequireRole>
+            }
+          />
+
+          {/* Your own account, whichever portal you belong to. */}
+          <Route
+            path="/profile"
+            element={
+              <RequireRole roles={["advisor", "admin"]}>
+                <AppShell>
+                  <ProfilePage />
                 </AppShell>
               </RequireRole>
             }
