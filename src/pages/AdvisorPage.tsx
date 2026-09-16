@@ -2,13 +2,13 @@ import { useState } from "react";
 import { useAuth } from "../auth/AuthProvider";
 import { CampaignDetailsModal } from "../components/CampaignDetailsModal";
 import { ClientStatementPanel } from "../components/ClientStatementPanel";
-import { SearchIcon } from "../components/Icons";
+import { RefreshIcon, SearchIcon } from "../components/Icons";
 import { Alert, EmptyState, Loading } from "../components/Loading";
 import { Modal } from "../components/Modal";
 import { api } from "../data";
 import { formatMobile, monthAndYear, monthName, passTypeLabel, shortDate } from "../lib/format";
-import { currentDrawMonth } from "../lib/passes";
-import { useAsync } from "../lib/useAsync";
+import { ballotFor, passView } from "../lib/passes";
+import { useAsync, useRefreshOnFocus } from "../lib/useAsync";
 import type { ClientStatement } from "../lib/types";
 
 /**
@@ -47,12 +47,17 @@ export function AdvisorPage() {
     return api.getWinners(page.data.campaign.id, winnersMonth);
   }, [winnersMonth, page.data?.campaign.id]);
 
+  // Pass counts get read out to clients, so the page should not be showing
+  // whatever the database held when it was opened this morning.
+  useRefreshOnFocus(page.reload);
+
   if (page.loading) return <Loading label="Loading your clients…" />;
   if (page.error) return <div className="page"><Alert kind="err">{page.error}</Alert></div>;
   if (!page.data) return null;
 
   const { campaign, activities, clients, draws } = page.data;
-  const drawMonth = currentDrawMonth(campaign);
+  const view = passView(campaign, draws);
+  const drawMonth = view.currentMonth;
 
   // One chip per month that has actually been drawn. Gold and blue are separate
   // rows and can fall in the same month, so the months are de-duplicated.
@@ -60,13 +65,10 @@ export function AdvisorPage() {
     ...new Set(draws.filter((d) => d.isDrawn).map((d) => d.drawMonth)),
   ].sort();
 
-  // The draw each pass type is currently collecting for, so the cut-off strip
-  // can say where gold is going as well as blue.
-  const nextDraw = (passType: "gold" | "blue") =>
-    draws
-      .filter((d) => d.passType === passType && !d.isDrawn)
-      .sort((a, b) => a.drawMonth.localeCompare(b.drawMonth))[0] ?? null;
-  const nextGold = nextDraw("gold");
+  // Where gold is actually going. Not the earliest gold draw on the calendar —
+  // a campaign with a gold draw every month still pools all of it into the last
+  // one, and naming July's would tell a consultant the opposite of the truth.
+  const goldBallot = ballotFor("gold", view);
 
   // Passes across the book sitting in a closed draw with no result recorded. In
   // the days after a month turns this is why the blue column has collapsed, and
@@ -121,13 +123,22 @@ export function AdvisorPage() {
             No. of passes as of <b>{shortDate(campaign.dataAsOf)}</b>
           </span>
         )}
+        <button
+          type="button"
+          className="refresh"
+          onClick={() => page.reload()}
+          disabled={page.loading}
+        >
+          {page.loading ? <span className="spinner" /> : <RefreshIcon />}
+          {page.loading ? "Refreshing…" : "Refresh"}
+        </button>
         <span className="note">
           The counts below are this draw only. Blue passes enter the draw for the
           month they were earned and are used up by it — they are not carried
           forward.{" "}
-          {nextGold
-            ? `Gold passes are held for the ${monthAndYear(nextGold.drawMonth)} draw.`
-            : "Gold passes are held for the campaign draw."}{" "}
+          {campaign.drawSchedule.gold === "monthly"
+            ? `Gold passes enter the same draw.`
+            : `Gold passes are held for the ${monthAndYear(goldBallot)} draw.`}{" "}
           Activity recorded after this date counts toward the following draw.
         </span>
         {awaiting > 0 && (

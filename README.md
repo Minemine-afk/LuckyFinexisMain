@@ -156,6 +156,17 @@ a consultant asking for every pass event in the firm simply receives their own c
 are not what keeps them safe. `RequireRole` in the router is the same: a convenience that
 avoids showing someone a page of failed queries, not a security boundary.
 
+Because of that, **the client list is not filtered on `advisor_id` at all.** That value
+reaches the query from React state, which anyone can edit in devtools, so filtering on it
+would make a browser-supplied string the thing that decides whose book comes back. The query
+asks for every client and row level security returns exactly the caller's own. The result is
+then checked against the signed-in consultant, and a mismatch throws rather than renders —
+so a policy loosened by accident surfaces as a refusal instead of a quiet leak.
+
+The same reasoning runs through the error messages. Postgres errors name tables, columns and
+policies, and the sign-in screen is reachable by anyone; so the detail goes to the console and
+the user gets a message that tells them what to do next and nothing about the schema.
+
 Privileged writes never happen from the browser. The service role key belongs only in a Worker
 secret. Anything named `VITE_*` is compiled into the JavaScript the browser downloads.
 
@@ -179,6 +190,25 @@ produces a consultant being told their book is empty. The watch is what turns th
 
 Grants are `SELECT` to `authenticated` only. `anon` is revoked: the app never queries before
 sign-in, so an anonymous key should reach nothing at all.
+
+### Headers
+
+`public/_headers` carries a Content-Security-Policy, and it is load-bearing rather than
+decorative: the signed-in session lives in `localStorage`, so any script running on this
+origin can read it. `script-src 'self'` means only the hashed bundle runs, and `connect-src`
+pins the single backend the app may talk to — so a compromised dependency has nowhere to send
+a stolen token. `'unsafe-inline'` appears in `style-src` only, for React's `style={{ }}`
+attributes; scripts get no such exemption.
+
+Production builds emit no source map. Pages serves `dist/` wholesale, so an emitted `.map`
+is published next to the bundle and hands any visitor the full annotated source.
+
+### Freshness
+
+Pass counts get read out to clients, so the consultant's page refetches when the tab comes
+back to the foreground — throttled to once every 30 seconds — and carries a Refresh control
+for when that is not enough. Reads go directly to Postgres; there is no cache in between, so
+what is on screen is what the database held at the moment of the last fetch.
 
 ### Layout
 

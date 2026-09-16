@@ -12,20 +12,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
   const maybeSingle = vi.fn();
+  const from = vi.fn();
   const auth = {
     signInWithPassword: vi.fn(),
     signOut: vi.fn(),
     getSession: vi.fn(),
     onAuthStateChange: vi.fn(),
   };
-  return {
-    maybeSingle,
-    auth,
-    client: {
-      auth,
-      from: () => ({ select: () => ({ eq: () => ({ maybeSingle }) }) }),
-    },
-  };
+  return { maybeSingle, from, auth, client: { auth, from } };
 });
 
 vi.mock("../lib/supabase", () => ({
@@ -43,6 +37,19 @@ const user = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+/**
+ * Await a call that must reject, and hand back the error it threw. Fails loudly
+ * if it resolves — a `.catch()` alone would let a silent success through.
+ */
+async function rejection(p: Promise<unknown>): Promise<Error> {
+  try {
+    await p;
+  } catch (e) {
+    return e as Error;
+  }
+  throw new Error("expected the call to reject, but it resolved");
+}
+
 /** The `advisors` lookup inside `resolveViewer`. */
 const advisorRow = (data: unknown) => mocks.maybeSingle.mockResolvedValue({ data, error: null });
 const noAdvisorRow = () => mocks.maybeSingle.mockResolvedValue({ data: null, error: null });
@@ -50,6 +57,10 @@ const noAdvisorRow = () => mocks.maybeSingle.mockResolvedValue({ data: null, err
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.auth.signOut.mockResolvedValue({ error: null });
+  // Default: every table answers the advisors lookup inside resolveViewer.
+  mocks.from.mockImplementation(() => ({
+    select: () => ({ eq: () => ({ maybeSingle: mocks.maybeSingle }) }),
+  }));
 });
 
 describe("signing in", () => {
@@ -68,7 +79,7 @@ describe("signing in", () => {
   it("ends the session when no consultant record is linked", async () => {
     noAdvisorRow();
     await expect(supabaseApi.signIn("amy@finexis.example", "pw")).rejects.toThrow(
-      /No consultant record/,
+      /not set up for the campaign portal/,
     );
     // The whole point: the password was right, so a session now exists.
     expect(mocks.auth.signOut).toHaveBeenCalledTimes(1);
@@ -77,7 +88,7 @@ describe("signing in", () => {
   it("ends the session when the advisors table cannot be read", async () => {
     mocks.maybeSingle.mockResolvedValue({ data: null, error: { message: "permission denied" } });
     await expect(supabaseApi.signIn("amy@finexis.example", "pw")).rejects.toThrow(
-      /Could not read the advisors table/,
+      /Could not sign you in/,
     );
     expect(mocks.auth.signOut).toHaveBeenCalledTimes(1);
   });
@@ -86,8 +97,27 @@ describe("signing in", () => {
     noAdvisorRow();
     mocks.auth.signOut.mockRejectedValue(new Error("network down"));
     await expect(supabaseApi.signIn("amy@finexis.example", "pw")).rejects.toThrow(
-      /No consultant record/,
+      /not set up for the campaign portal/,
     );
+  });
+
+  it("tells the user nothing about the schema it just failed against", async () => {
+    mocks.maybeSingle.mockResolvedValue({
+      data: null,
+      error: { message: 'permission denied for table "advisors"' },
+    });
+    const err = await rejection(supabaseApi.signIn("amy@finexis.example", "pw"));
+
+    // Anyone who can reach the login page can read this string.
+    expect(err.message).not.toMatch(/advisors|permission denied|policy|auth_user_id/i);
+    expect(err.message).not.toContain("auth-user-1");
+  });
+
+  it("does not print the account id when the account is not linked", async () => {
+    noAdvisorRow();
+    const err = await rejection(supabaseApi.signIn("amy@finexis.example", "pw"));
+    expect(err.message).not.toContain("auth-user-1");
+    expect(err.message).not.toMatch(/row level security|advisors/i);
   });
 
   it("admits an admin on app_metadata alone, with no advisor row", async () => {
@@ -125,7 +155,7 @@ describe("resuming a session on page load", () => {
     mocks.auth.getSession.mockResolvedValue({ data: { session: { user: user() } }, error: null });
     noAdvisorRow();
 
-    await expect(supabaseApi.currentViewer()).rejects.toThrow(/No consultant record/);
+    await expect(supabaseApi.currentViewer()).rejects.toThrow(/not set up for the campaign portal/);
     expect(mocks.auth.signOut).toHaveBeenCalledTimes(1);
   });
 
@@ -135,6 +165,89 @@ describe("resuming a session on page load", () => {
       error: { message: "storage unavailable" },
     });
     await expect(supabaseApi.currentViewer()).rejects.toThrow(/Could not read your session/);
+  });
+});
+
+describe("loading a consultant's clients", () => {
+  /**
+   * The query deliberately does not filter on `advisor_id` — that value comes
+   * from React state, which anyone can edit. Row level security is what scopes
+   * the read, and these cases pin down what happens when it doesn't.
+   */
+  const CAMPAIGN = {
+    id: "camp-1", name: "ATW",
+    start_date: "2026-07-01", end_date: "2026-12-31", is_active: true,
+  };
+  const RATE_CARD = [{
+    code: "attend_event", label: "Attend Client Events", pass_type: "blue",
+    passes_per_unit: 5, unit_noun: "Event", sort_order: 1, is_active: true,
+  }];
+  const clientRow = (id: string, advisor_id: string) => ({
+    id, advisor_id, client_name: `Client ${id}`,
+    client_mobile: "90000000", client_email: `${id}@example.com`,
+  });
+
+  /** A chainable PostgREST stub: filters return itself, awaiting resolves. */
+  const chain = (list: unknown[], single: unknown = null) => {
+    const self: Record<string, unknown> = {};
+    for (const m of ["select", "eq", "in", "order", "limit", "not"]) self[m] = () => self;
+    self.maybeSingle = () => Promise.resolve({ data: single, error: null });
+    self.single = () => Promise.resolve({ data: single, error: null });
+    self.then = (ok: (v: unknown) => unknown, no?: (e: unknown) => unknown) =>
+      Promise.resolve({ data: list, error: null }).then(ok, no);
+    return self;
+  };
+
+  const withClients = (clients: unknown[], ledger: unknown[] = []) => {
+    const tables: Record<string, unknown> = {
+      campaigns: chain([], CAMPAIGN),
+      pass_ledger: chain(ledger, { date_updated: "2026-09-10" }),
+      challenge_types: chain(RATE_CARD),
+      draws: chain([]),
+      clients: chain(clients),
+      prizes_won: chain([]),
+    };
+    mocks.from.mockImplementation((t: string) => tables[t]);
+  };
+
+  it("returns the consultant's own clients", async () => {
+    withClients([clientRow("cli-1", "adv-1"), clientRow("cli-2", "adv-1")], [
+      { id: "l1", client_id: "cli-1", campaign_id: "camp-1", draw_id: null,
+        challenge_code: "attend_event", units: 1, passes_awarded: 5, rate_applied: 5,
+        status: "confirmed", occurred_on: "2026-09-04", date_updated: null,
+        external_ref: "Briefing", description: null },
+    ]);
+
+    const rows = await supabaseApi.getAdvisorClients("adv-1", "camp-1");
+    expect(rows.map((r) => r.client.id)).toEqual(["cli-1"]);
+    expect(rows[0].blue).toBe(5);
+  });
+
+  it("cannot be made to fetch another consultant's book by editing the id", async () => {
+    // Row level security decides what comes back, so a tampered advisorId
+    // cannot widen the read. What it can do is disagree with the result — and
+    // that disagreement is treated as a fault, not quietly served.
+    withClients([clientRow("cli-1", "adv-1")]);
+    await expect(supabaseApi.getAdvisorClients("adv-2", "camp-1")).rejects.toThrow(
+      /could not be loaded safely/i,
+    );
+  });
+
+  it("refuses to render rather than leak another consultant's client", async () => {
+    // What a loosened policy looks like: the read came back with someone else's.
+    withClients([clientRow("cli-1", "adv-1"), clientRow("cli-9", "adv-2")]);
+
+    await expect(supabaseApi.getAdvisorClients("adv-1", "camp-1")).rejects.toThrow(
+      /could not be loaded safely/i,
+    );
+  });
+
+  it("says nothing about the other consultant when it refuses", async () => {
+    withClients([clientRow("cli-9", "adv-2")]);
+    const err = await rejection(supabaseApi.getAdvisorClients("adv-1", "camp-1"));
+
+    expect(err.message).not.toContain("adv-2");
+    expect(err.message).not.toContain("cli-9");
   });
 });
 

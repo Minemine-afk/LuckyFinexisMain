@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as seed from "../data/mock";
 import {
   awaitingPasses,
+  ballotFor,
   ballotMonth,
   buildDrawHistory,
   buildPassBlocks,
@@ -15,7 +16,7 @@ import {
   type CampaignRules,
   type PassView,
 } from "./passes";
-import type { Activity, Draw, PassEvent } from "./types";
+import type { Activity, Draw, DrawMonth, PassEvent, PassType } from "./types";
 
 const eventsFor = (clientId: string) =>
   seed.passEvents.filter((e) => e.clientId === clientId);
@@ -33,11 +34,19 @@ const rules = (
   endsOn = "2026-12-31",
 ): CampaignRules => ({ drawSchedule: { gold, blue }, endsOn });
 
+/** Mirrors `passView`, but with the month and draws stated rather than derived. */
 const view = (
   currentMonth: string,
   draws: Draw[] = [],
   r: CampaignRules = rules("campaign_end", "monthly"),
-): PassView => ({ rules: r, drawn: drawnKeys(draws), currentMonth });
+): PassView => {
+  const finalBallot: Partial<Record<PassType, DrawMonth>> = {};
+  for (const d of draws) {
+    const seen = finalBallot[d.passType];
+    if (!seen || d.drawMonth > seen) finalBallot[d.passType] = d.drawMonth;
+  }
+  return { rules: r, drawn: drawnKeys(draws), currentMonth, finalBallot };
+};
 
 const event = (drawMonth: string, passes = 10, over: Partial<PassEvent> = {}): PassEvent => ({
   id: "e1",
@@ -115,7 +124,7 @@ describe("a pass belongs to one ballot", () => {
 
   it("leaves gold accumulating across every month until its one draw", () => {
     const held = [event("2026-07"), event("2026-09", 10, { id: "e2" })];
-    expect(ballotMonth(held[0], "gold", rules("campaign_end", "monthly"))).toBe("2026-12");
+    expect(ballotMonth(held[0], "gold", view("2026-10"))).toBe("2026-12");
     expect(livePasses(held, "gold", gold, view("2026-10"))).toBe(20);
 
     const after = view("2026-12", [draw("gold", "2026-12", true)]);
@@ -136,6 +145,55 @@ describe("a pass belongs to one ballot", () => {
     const everyMonth = rules("monthly", "monthly");
     const v = view("2026-08", [], everyMonth);
     expect(livePasses([event("2026-07")], "gold", gold, v)).toBe(0);
+  });
+});
+
+/**
+ * A draw is held after the period it covers, so the campaign-close gold draw
+ * sits in a later month than the campaign's own end date. These cases are the
+ * ones the demo dataset cannot reach: there, the single gold draw happens to
+ * share a month with `endsOn`, so a ballot derived from either looks correct.
+ */
+describe("the campaign-close ballot follows the draws, not the end date", () => {
+  const gold = card({ passType: "gold" });
+  const held = [event("2026-07")];
+
+  it("uses the last gold draw of the campaign, not the first", () => {
+    const every = ["2026-07", "2026-08", "2026-09", "2026-10", "2026-11", "2026-12"];
+    const v = view("2026-09", every.map((m) => draw("gold", m, false)));
+    expect(ballotMonth(held[0], "gold", v)).toBe("2026-12");
+    expect(ballotFor("gold", v)).toBe("2026-12");
+  });
+
+  it("spends gold when the final gold draw runs", () => {
+    const v = view("2026-12", [draw("gold", "2026-11", false), draw("gold", "2026-12", true)]);
+    expect(livePasses(held, "gold", gold, v)).toBe(0);
+  });
+
+  it("does not spend gold when an earlier gold draw runs", () => {
+    const v = view("2026-09", [draw("gold", "2026-08", true), draw("gold", "2026-12", false)]);
+    expect(livePasses(held, "gold", gold, v)).toBe(10);
+  });
+
+  it("still spends gold when the campaign end month and the draw month differ", () => {
+    // The campaign closes in December; its draw is held in January and is
+    // recorded against December. Deriving the ballot from `endsOn` alone used
+    // to work here only by coincidence — and broke silently when it did not.
+    const closes = rules("campaign_end", "monthly", "2026-12-31");
+    const v = view("2027-01", [draw("gold", "2026-12", true)], closes);
+    expect(livePasses(held, "gold", gold, v)).toBe(0);
+
+    // The case that was actually broken: a campaign whose end date falls in a
+    // month with no gold draw at all.
+    const january = rules("campaign_end", "monthly", "2027-01-31");
+    const drifted = view("2027-01", [draw("gold", "2026-12", true)], january);
+    expect(ballotMonth(held[0], "gold", drifted)).toBe("2026-12");
+    expect(livePasses(held, "gold", gold, drifted)).toBe(0);
+  });
+
+  it("falls back to the campaign end month when no draw of that type exists", () => {
+    const v = view("2026-09", [draw("blue", "2026-09", false)]);
+    expect(ballotMonth(held[0], "gold", v)).toBe("2026-12");
   });
 });
 

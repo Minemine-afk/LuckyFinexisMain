@@ -147,6 +147,47 @@
   color: var(--ink-2);
 }
 
+/* Sits with the "as of" stamp, because the two answer the same question:
+   how current is what I am looking at. */
+.cutoff .refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  border: 1px solid var(--brand-line);
+  border-radius: 7px;
+  background: var(--surface);
+  padding: 4px 11px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--brand);
+  cursor: pointer;
+}
+
+.cutoff .refresh:hover:not(:disabled) {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+
+.cutoff .refresh:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.cutoff .refresh .spinner {
+  width: 13px;
+  height: 13px;
+  border-width: 2px;
+}
+
+@media (max-width: 640px) {
+  .cutoff .refresh {
+    margin-left: 0;
+  }
+}
+
 /* Only appears in the gap between a month closing and its draw being recorded.
    It is the explanation for a column of zeroes, so it is set apart from the
    standing note rather than appended to it. */

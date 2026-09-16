@@ -54,6 +54,11 @@ export interface PassView {
   drawn: Set<string>;
   /** The ballot now collecting. */
   currentMonth: DrawMonth;
+  /**
+   * For a pass type drawn once at campaign close, the month of the last draw of
+   * that type that actually exists. Absent when the campaign has none scheduled.
+   */
+  finalBallot: Partial<Record<PassType, DrawMonth>>;
 }
 
 /** Identifies a draw by what it draws, not by row id: "blue|2026-09". */
@@ -68,15 +73,27 @@ export function drawMonthOf(earnedOn: string): DrawMonth {
   return earnedOn.slice(0, 7);
 }
 
-/** The ballot this pass is in — the only one it will ever be in. */
+/**
+ * The ballot this pass is in — the only one it will ever be in.
+ *
+ * For a `campaign_end` type the ballot is the last draw of that type that the
+ * campaign actually has, rather than a month computed from the campaign's end
+ * date. Those two are not the same thing: a draw is held after the period it
+ * covers, so the campaign-close gold draw sits in January for a campaign ending
+ * in December. Deriving the month arithmetically meant gold was only ever spent
+ * if `campaigns.end_date` happened to land in the same month as a gold draw —
+ * and when it did not, nothing failed, gold simply stayed live for ever.
+ *
+ * The campaign end month remains the fallback, for a campaign with no draw of
+ * that type scheduled yet.
+ */
 export function ballotMonth(
   event: PassEvent,
   passType: PassType,
-  rules: CampaignRules,
+  view: PassView,
 ): DrawMonth {
-  return rules.drawSchedule[passType] === "monthly"
-    ? event.drawMonth
-    : rules.endsOn.slice(0, 7);
+  if (view.rules.drawSchedule[passType] === "monthly") return event.drawMonth;
+  return view.finalBallot[passType] ?? view.rules.endsOn.slice(0, 7);
 }
 
 /**
@@ -112,11 +129,29 @@ export function passView(
   draws: Draw[],
   now: Date = new Date(),
 ): PassView {
+  // The last draw of each type, which is where a campaign-close pass ends up.
+  const finalBallot: Partial<Record<PassType, DrawMonth>> = {};
+  for (const d of draws) {
+    const seen = finalBallot[d.passType];
+    if (!seen || d.drawMonth > seen) finalBallot[d.passType] = d.drawMonth;
+  }
+
   return {
     rules: { drawSchedule: campaign.drawSchedule, endsOn: campaign.endsOn },
     drawn: drawnKeys(draws),
     currentMonth: currentDrawMonth(campaign, now),
+    finalBallot,
   };
+}
+
+/**
+ * The ballot a pass type is collecting into — the month a consultant should be
+ * told their clients' passes are heading for.
+ */
+export function ballotFor(passType: PassType, view: PassView): DrawMonth {
+  return view.rules.drawSchedule[passType] === "monthly"
+    ? view.currentMonth
+    : view.finalBallot[passType] ?? view.rules.endsOn.slice(0, 7);
 }
 
 export type PassState = "live" | "upcoming" | "awaiting" | "drawn";
@@ -136,7 +171,7 @@ export function passState(
   // An administrator retiring one pass by hand, which no draw explains.
   if (event.consumedByDrawId !== null) return "drawn";
 
-  const ballot = ballotMonth(event, passType, view.rules);
+  const ballot = ballotMonth(event, passType, view);
   if (view.drawn.has(drawKey(passType, ballot))) return "drawn";
 
   // A monthly pass is live only while its own month is the one collecting. A
@@ -369,7 +404,7 @@ export function buildDrawHistory(
     if (e.status !== "valid") continue;
     const passType = types.get(e.activityId);
     if (!passType) continue;
-    const key = drawKey(passType, ballotMonth(e, passType, view.rules));
+    const key = drawKey(passType, ballotMonth(e, passType, view));
     const list = groups.get(key) ?? [];
     list.push(e);
     groups.set(key, list);

@@ -45,3 +45,34 @@ export function useAsync<T>(loader: () => Promise<T>, deps: unknown[]): AsyncSta
   const reload = useCallback(() => setNonce((n) => n + 1), []);
   return { data, error, loading, reload };
 }
+
+/**
+ * Re-run a loader when the tab comes back to the foreground.
+ *
+ * A consultant leaves the portal open on a second monitor for a day at a time.
+ * Without this, the pass counts on screen are whatever the database held when
+ * the page was first opened — and a stale pass count is the one thing this page
+ * must not show, because it is read out to clients.
+ *
+ * Throttled, so alt-tabbing repeatedly does not hammer the database.
+ */
+export function useRefreshOnFocus(reload: () => void, minIntervalMs = 30_000): void {
+  const last = useRef(Date.now());
+
+  useEffect(() => {
+    const maybe = () => {
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - last.current < minIntervalMs) return;
+      last.current = now;
+      reload();
+    };
+
+    window.addEventListener("focus", maybe);
+    document.addEventListener("visibilitychange", maybe);
+    return () => {
+      window.removeEventListener("focus", maybe);
+      document.removeEventListener("visibilitychange", maybe);
+    };
+  }, [reload, minIntervalMs]);
+}

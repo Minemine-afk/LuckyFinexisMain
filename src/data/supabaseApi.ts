@@ -93,8 +93,16 @@ interface PrizeRow {
 
 /* ---------- value mapping ---------- */
 
+/**
+ * Report a failed read.
+ *
+ * The context is written for the person looking at the screen; the driver's own
+ * message goes to the console. Postgres errors name tables, columns and
+ * constraints, and none of that belongs in a consultant's browser window.
+ */
 const fail = (context: string, error: { message: string } | null): never => {
-  throw new ApiError(`${context}: ${error?.message ?? "unknown error"}`);
+  console.error(`[db] ${context}:`, error?.message ?? "unknown error");
+  throw new ApiError(`${context}. Please try again in a moment.`);
 };
 
 const asPassType = (value: string | null): PassType =>
@@ -258,9 +266,12 @@ async function resolveViewer(
     .maybeSingle<{ id: string; fc_name: string }>();
 
   // A failed query and an absent row are different problems, and reporting them
-  // identically turns a one-line fix into a guessing game.
+  // identically turns a one-line fix into a guessing game — but the detail
+  // belongs in the console, not on the sign-in screen. Raw Postgres text names
+  // tables and columns to anyone who can reach the login page.
   if (error) {
-    throw new ApiError(`Could not read the advisors table: ${error.message}`);
+    console.error("[auth] advisors lookup failed:", error.message, { userId });
+    throw new ApiError("Could not sign you in. Please try again in a moment.");
   }
 
   if (role === "admin") {
@@ -273,12 +284,16 @@ async function resolveViewer(
 
   // Row level security returns an empty result rather than an error when it
   // denies a read, so "no advisor" covers both "the column is not set" and "the
-  // policy did not admit me". Naming the id being looked for lets either be
-  // checked against the table in one query.
+  // policy did not admit me". Whoever is setting the account up needs to know
+  // which; the person at the sign-in screen must not be told the id being looked
+  // for, the table it lives in, or that a policy exists at all.
+  console.error(
+    `[auth] no advisors row readable with auth_user_id = ${userId}. ` +
+      `Either the column is not set, or the row level security policy did not ` +
+      `admit this user.`,
+  );
   throw new ApiError(
-    `No consultant record is linked to this sign-in. No row in "advisors" is readable ` +
-      `with auth_user_id = ${userId}. Either that column is not set, or the row level ` +
-      `security policy did not admit this user.`,
+    "This account is not set up for the campaign portal. Please contact your administrator.",
   );
 }
 
@@ -425,11 +440,15 @@ export const supabaseApi: PortalApi = {
     const db = supabase();
     const campaign = await this.getCampaign();
 
+    // No `.eq("advisor_id", …)` here, deliberately. `advisorId` reaches this
+    // function from React state, which anyone can edit in devtools — filtering
+    // on it would make a client-supplied value the thing that decides whose
+    // book comes back. Row level security already restricts `clients` to the
+    // caller's own, so asking for all of them returns exactly theirs.
     const [{ data: clientRows, error: clientErr }, activities, draws] = await Promise.all([
       db
         .from("clients")
         .select("id, advisor_id, client_name, client_mobile, client_email")
-        .eq("advisor_id", advisorId)
         .order("client_name"),
       this.getActivities(campaignId),
       this.getDraws(campaignId),
@@ -437,6 +456,20 @@ export const supabaseApi: PortalApi = {
     if (clientErr) fail("Could not load your clients", clientErr);
 
     const clients = (clientRows as ClientRow[]).map(toClient);
+
+    // Belt and braces. If a policy is ever loosened by accident, this turns a
+    // silent leak of another consultant's book into a refusal to render.
+    const foreign = clients.filter((c) => c.advisorId !== advisorId);
+    if (foreign.length > 0) {
+      console.error(
+        `[security] clients query returned ${foreign.length} row(s) belonging to ` +
+          `another consultant. Check the row level security policy on "clients".`,
+      );
+      throw new ApiError(
+        "Your client list could not be loaded safely. Please contact your administrator.",
+      );
+    }
+
     if (clients.length === 0) return [];
 
     const ids = clients.map((c) => c.id);

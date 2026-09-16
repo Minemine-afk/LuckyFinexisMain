@@ -71,6 +71,13 @@ export const UploadIcon = ({ size = 20 }: IconProps) => (
   </svg>
 );
 
+export const RefreshIcon = ({ size = 15 }: IconProps) => (
+  <svg {...base(size)}>
+    <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+    <path d="M21 3v6h-6" />
+  </svg>
+);
+
 export const SearchIcon = ({ size = 18 }: IconProps) => (
   <svg {...base(size)}>
     <circle cx="10.5" cy="10.5" r="6" />
