@@ -640,7 +640,10 @@ describe("importing pass activity", () => {
         "camp-1",
       );
       await supabaseApi.commitUpload(p, "camp-1");
-      expect(written[0].rows.map((r) => r.status)).toEqual(["pending", "void"]);
+      // `void` is the app's word and the CSV's; the column's CHECK constraint
+      // allows only pending / confirmed / rejected, so it is written as
+      // `rejected` — which `asStatus` reads back as void.
+      expect(written[0].rows.map((r) => r.status)).toEqual(["pending", "rejected"]);
     });
 
     it("sends the rate and not the total, because the total is a generated column", async () => {

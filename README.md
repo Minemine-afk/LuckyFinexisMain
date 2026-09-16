@@ -10,7 +10,7 @@ whole portal can be clicked through before a Supabase project exists.
 ```bash
 npm install
 npm run dev          # http://localhost:5173, demo data, no backend needed
-npm test             # 130 tests over the pass arithmetic, CSV parser, ingest rules and provider
+npm test             # 133 tests over the pass arithmetic, CSV parser, ingest rules and provider
 npm run build        # tsc -b && vite build -> dist/
 ```
 
@@ -124,6 +124,15 @@ entry. That is the natural key, and it is why re-uploading last month's export a
 rather than doubling everybody's passes. `reference` — a policy number, a referral name, an
 event name — is what separates two genuinely different events on the same day.
 
+**A reference is not globally unique, and must not be.** Two clients at the same briefing
+carry the same `reference`, and that is the correct record of what happened — the pair
+(client, activity, date, reference) is what has to be unique, not the reference alone.
+`pass_ledger` originally had `unique (external_ref)` across the whole table, which forced the
+loader to synthesise strings like `August:someone@example.com:purchase_product` to get past
+it. That is the snapshot's signature: the constraint did not merely coexist with the
+double-counting bug, it required the shape that caused it. `0006` drops it, leaving the
+natural-key index from `0005` to do the job properly.
+
 The key is built from the **resolved client**, not from whatever text the file used to name
 them. A spreadsheet may identify a client by email one month and by a client code the next;
 keyed on the raw text those are two different keys for one event, and re-running a load would
@@ -167,6 +176,17 @@ before a first load:
 select client_email, count(*) from clients
  where client_email is not null group by client_email having count(*) > 1;
 ```
+
+### What the database enforces
+
+Worth knowing before writing an importer or loading by hand:
+
+| Constraint | Effect |
+|---|---|
+| `passes_awarded` is **generated** as `units * rate_applied` | An insert that supplies a value for it is refused outright. Write the rate; the total is derived. |
+| `status` CHECK | Only `pending`, `confirmed`, `rejected`. The app's `valid` and `void` are mapped on write by `STATUS_TO_DB` and read back by `asStatus`. |
+| `challenge_code` foreign key | A typo'd activity code is refused rather than silently earning nothing. |
+| `units > 0`, `rate_applied > 0` | Checked before the row lands, as well as in the preview. |
 
 ### Reloading the ledger
 

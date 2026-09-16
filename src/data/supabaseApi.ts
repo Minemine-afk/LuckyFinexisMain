@@ -172,14 +172,18 @@ function asStatus(value: string | null): PassStatus {
  * `confirmed`, which is also the column's default and what every row loaded
  * before the importer existed carries. Writing `valid` would work — `asStatus`
  * reads anything it does not recognise as valid — but it would leave the ledger
- * speaking two vocabularies depending on which decade a row arrived in, and
- * would break outright against a CHECK constraint naming the three the table
- * already uses.
+ * speaking two vocabularies depending on which decade a row arrived in.
+ *
+ * The three words are not a preference: `pass_ledger_status_check` restricts the
+ * column to exactly `pending`, `confirmed` and `rejected`. `void` — the app's
+ * own word, and the one the CSV format uses — is not among them, so writing it
+ * fails the insert rather than storing something odd. `rejected` is already in
+ * `VOID_WORDS` above, so it reads back as `void` and the round trip holds.
  */
 const STATUS_TO_DB: Record<PassStatus, string> = {
   valid: "confirmed",
   pending: "pending",
-  void: "void",
+  void: "rejected",
 };
 
 const MONTH_NAMES = [
