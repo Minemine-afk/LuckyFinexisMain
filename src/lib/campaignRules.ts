@@ -16,10 +16,16 @@
  * Activities worth passes exactly once per client, however many times they turn
  * up in the ledger. A client downloads the app once and writes one testimonial;
  * further rows are the same event re-exported, not a second award.
+ *
+ * These are `challenge_types.code` values and must match the live rate card
+ * exactly — a code that does not exist makes the cap silently do nothing, which
+ * is how this list spent two commits inert: it was written from the demo
+ * dataset's codes (`download_finconnect`, `submit_testimonial`) rather than the
+ * database's.
  */
 export const ONCE_PER_CLIENT: ReadonlySet<string> = new Set([
-  "download_finconnect",
-  "submit_testimonial",
+  "finconnect",
+  "testimonial",
 ]);
 
 export const isOncePerClient = (code: string): boolean =>

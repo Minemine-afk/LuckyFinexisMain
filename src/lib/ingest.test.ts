@@ -37,14 +37,14 @@ describe("header validation", () => {
 
 describe("row validation", () => {
   it("accepts a good row and works out the passes", () => {
-    const p = preview(`${HEAD}\nC-1001,attend_client_event,2,2026-09-01,Sep briefing`);
+    const p = preview(`${HEAD}\nC-1001,attend_event,2,2026-09-01,Sep briefing`);
     expect(p.counts).toEqual({ insert: 1, duplicate: 0, reject: 0 });
     expect(p.rows[0].passes).toBe(10); // 2 events x 5 passes
     expect(p.rows[0].drawMonth).toBe("2026-09");
   });
 
   it("rejects a client reference that is not on the books", () => {
-    const p = preview(`${HEAD}\nC-9999,attend_client_event,1,2026-09-01,x`);
+    const p = preview(`${HEAD}\nC-9999,attend_event,1,2026-09-01,x`);
     expect(p.rows[0].outcome).toBe("reject");
     expect(p.rows[0].reason).toMatch(/No client with reference/);
   });
@@ -58,32 +58,32 @@ describe("row validation", () => {
     ["01/09/2026", /earned_on must be YYYY-MM-DD/],
     ["2026-9-1", /earned_on must be YYYY-MM-DD/],
   ])("rejects the date %s", (date, message) => {
-    const p = preview(`${HEAD}\nC-1001,attend_client_event,1,${date},x`);
+    const p = preview(`${HEAD}\nC-1001,attend_event,1,${date},x`);
     expect(p.rows[0].reason).toMatch(message);
   });
 
   it.each(["0", "-2", "1.5", "many"])("rejects units of %s", (units) => {
-    const p = preview(`${HEAD}\nC-1001,attend_client_event,${units},2026-09-01,x`);
+    const p = preview(`${HEAD}\nC-1001,attend_event,${units},2026-09-01,x`);
     expect(p.rows[0].reason).toMatch(/units must be a whole number above zero/);
   });
 
   it("rejects a status it does not recognise", () => {
     const p = preview(
-      `${HEAD},status\nC-1001,attend_client_event,1,2026-09-01,x,maybe`,
+      `${HEAD},status\nC-1001,attend_event,1,2026-09-01,x,maybe`,
     );
     expect(p.rows[0].reason).toMatch(/status must be one of/);
   });
 
   it("refuses to backdate a pass into a draw that already happened", () => {
     const p = preview(
-      `${HEAD},draw_month\nC-1001,attend_client_event,1,2026-09-01,x,2026-07`,
+      `${HEAD},draw_month\nC-1001,attend_event,1,2026-09-01,x,2026-07`,
     );
     expect(p.rows[0].reason).toMatch(/before the month the pass was earned/);
   });
 
   it("allows deferring a pass to a later draw", () => {
     const p = preview(
-      `${HEAD},draw_month\nC-1001,attend_client_event,1,2026-09-01,x,2026-11`,
+      `${HEAD},draw_month\nC-1001,attend_event,1,2026-09-01,x,2026-11`,
     );
     expect(p.rows[0].outcome).toBe("insert");
     expect(p.rows[0].drawMonth).toBe("2026-11");
@@ -91,17 +91,17 @@ describe("row validation", () => {
 
   it("keeps counting the remaining rows after a bad one", () => {
     const p = preview(
-      `${HEAD}\nC-9999,attend_client_event,1,2026-09-01,x\nC-1001,attend_client_event,1,2026-09-02,y`,
+      `${HEAD}\nC-9999,attend_event,1,2026-09-01,x\nC-1001,attend_event,1,2026-09-02,y`,
     );
     expect(p.counts).toEqual({ insert: 1, duplicate: 0, reject: 1 });
   });
 });
 
 describe("deduplication", () => {
-  const row = `C-1001,attend_client_event,1,2026-09-01,Sep briefing`;
+  const row = `C-1001,attend_event,1,2026-09-01,Sep briefing`;
 
   it("skips a row already in the ledger", () => {
-    const key = naturalKey(seed.campaign.id, "C-1001", "attend_client_event", "2026-09-01", "Sep briefing");
+    const key = naturalKey(seed.campaign.id, "C-1001", "attend_event", "2026-09-01", "Sep briefing");
     const p = preview(`${HEAD}\n${row}`, ctx([key]));
     expect(p.counts.duplicate).toBe(1);
     expect(p.rows[0].reason).toBe("Already in the ledger");
@@ -115,13 +115,13 @@ describe("deduplication", () => {
 
   it("treats two different references on the same day as two events", () => {
     const p = preview(
-      `${HEAD}\nC-1001,purchase_qualifying_product,1,2026-09-01,POL-1\nC-1001,purchase_qualifying_product,1,2026-09-01,POL-2`,
+      `${HEAD}\nC-1001,purchase_product,1,2026-09-01,POL-1\nC-1001,purchase_product,1,2026-09-01,POL-2`,
     );
     expect(p.counts.insert).toBe(2);
   });
 
   it("ignores case and padding when matching a row it has seen", () => {
-    const key = naturalKey(seed.campaign.id, "c-1001", "attend_client_event", "2026-09-01", "sep briefing");
+    const key = naturalKey(seed.campaign.id, "c-1001", "attend_event", "2026-09-01", "sep briefing");
     const p = preview(`${HEAD}\n${row}`, ctx([key]));
     expect(p.counts.duplicate).toBe(1);
   });
@@ -131,7 +131,7 @@ describe("committing a preview", () => {
   it("turns only the accepted rows into ledger entries", () => {
     const context = ctx();
     const p = preview(
-      `${HEAD}\nC-1001,attend_client_event,2,2026-09-01,Sep\nC-9999,attend_client_event,1,2026-09-01,bad`,
+      `${HEAD}\nC-1001,attend_event,2,2026-09-01,Sep\nC-9999,attend_event,1,2026-09-01,bad`,
       context,
     );
     const events = toPassEvents(p, context, "test");
@@ -151,7 +151,7 @@ describe("committing a preview", () => {
 
   it("stores the reference exactly as written, commas and capitals intact", () => {
     const context = ctx();
-    const p = preview(`${HEAD}\nC-1001,attend_client_event,1,2026-09-01,"Boyle, Charles"`, context);
+    const p = preview(`${HEAD}\nC-1001,attend_event,1,2026-09-01,"Boyle, Charles"`, context);
     const events = toPassEvents(p, context, "test");
     expect(events[0].reference).toBe("Boyle, Charles");
     // ...even though the key used to spot a duplicate is case-folded.
@@ -163,8 +163,8 @@ describe("once-per-client activities", () => {
   it("takes only the first of two downloads in the same file", () => {
     const p = preview(
       `${HEAD}\n` +
-        `C-1001,download_finconnect,1,2026-09-03,install\n` +
-        `C-1001,download_finconnect,1,2026-09-18,reinstall`,
+        `C-1001,finconnect,1,2026-09-03,install\n` +
+        `C-1001,finconnect,1,2026-09-18,reinstall`,
     );
     expect(p.rows[0].outcome).toBe("insert");
     expect(p.rows[1].outcome).toBe("duplicate");
@@ -172,23 +172,23 @@ describe("once-per-client activities", () => {
   });
 
   it("turns one away when the client already has it in the ledger", () => {
-    const context = ctx([], [claimKey("C-1001", "download_finconnect")]);
-    const p = preview(`${HEAD}\nC-1001,download_finconnect,1,2026-09-18,reinstall`, context);
+    const context = ctx([], [claimKey("C-1001", "finconnect")]);
+    const p = preview(`${HEAD}\nC-1001,finconnect,1,2026-09-18,reinstall`, context);
     expect(p.rows[0].outcome).toBe("duplicate");
     expect(toPassEvents(p, context, "t")).toHaveLength(0);
   });
 
   it("does not let one client's claim block another's", () => {
-    const context = ctx([], [claimKey("C-1001", "download_finconnect")]);
-    const p = preview(`${HEAD}\nC-1002,download_finconnect,1,2026-09-18,install`, context);
+    const context = ctx([], [claimKey("C-1001", "finconnect")]);
+    const p = preview(`${HEAD}\nC-1002,finconnect,1,2026-09-18,install`, context);
     expect(p.rows[0].outcome).toBe("insert");
   });
 
   it("caps the testimonial too, and it is still worth 3 passes", () => {
     const p = preview(
       `${HEAD}\n` +
-        `C-1001,submit_testimonial,1,2026-09-01,first\n` +
-        `C-1001,submit_testimonial,1,2026-09-22,again`,
+        `C-1001,testimonial,1,2026-09-01,first\n` +
+        `C-1001,testimonial,1,2026-09-22,again`,
     );
     expect(p.rows[0].outcome).toBe("insert");
     expect(p.rows[0].passes).toBe(3);
@@ -198,24 +198,24 @@ describe("once-per-client activities", () => {
   it("leaves repeatable activities alone", () => {
     const p = preview(
       `${HEAD}\n` +
-        `C-1001,attend_client_event,1,2026-09-03,Briefing\n` +
-        `C-1001,attend_client_event,1,2026-09-18,Clinic`,
+        `C-1001,attend_event,1,2026-09-03,Briefing\n` +
+        `C-1001,attend_event,1,2026-09-18,Clinic`,
     );
     expect(p.rows.map((r) => r.outcome)).toEqual(["insert", "insert"]);
   });
 
   it("prefers the more precise reason when the very same row is re-uploaded", () => {
-    const key = naturalKey(seed.campaign.id, "C-1001", "download_finconnect", "2026-09-03", "install");
-    const context = ctx([key], [claimKey("C-1001", "download_finconnect")]);
-    const p = preview(`${HEAD}\nC-1001,download_finconnect,1,2026-09-03,install`, context);
+    const key = naturalKey(seed.campaign.id, "C-1001", "finconnect", "2026-09-03", "install");
+    const context = ctx([key], [claimKey("C-1001", "finconnect")]);
+    const p = preview(`${HEAD}\nC-1001,finconnect,1,2026-09-03,install`, context);
     expect(p.rows[0].reason).toBe("Already in the ledger");
   });
 
   it("does not let a voided row hold the slot", () => {
     const p = preview(
       `${HEAD},status\n` +
-        `C-1001,download_finconnect,1,2026-09-03,install,void\n` +
-        `C-1001,download_finconnect,1,2026-09-18,reinstall,valid`,
+        `C-1001,finconnect,1,2026-09-03,install,void\n` +
+        `C-1001,finconnect,1,2026-09-18,reinstall,valid`,
     );
     expect(p.rows[1].outcome).toBe("insert");
   });

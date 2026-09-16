@@ -117,14 +117,51 @@ function asStatus(value: string | null): PassStatus {
   return "valid";
 }
 
+const MONTH_NAMES = [
+  "january", "february", "march", "april", "may", "june",
+  "july", "august", "september", "october", "november", "december",
+];
+
 /**
- * The month a draw belongs to.
+ * The month a draw is *for*, which is not the month it is held in.
  *
- * Taken from `draw_date`, which is a real date, rather than from the free-text
- * `monthly_draw` — that column may hold "August", "Aug 2026" or "2026-08"
- * depending on who typed it, so it is kept for display only.
+ * `draw_date` is when the draw happens, and the convention here is the 7th of
+ * the following month — July's draw runs on 2026-08-07, December's on
+ * 2027-01-07. Slicing the year-month off it therefore attributes every draw to
+ * the month after the one it belongs to, which shifts every pass into the wrong
+ * ballot and labels every winners chip with the wrong month.
+ *
+ * `monthly_draw` is the only column carrying the period. It is free text, so it
+ * is matched on its first three letters rather than parsed strictly, and the
+ * year is chosen to place the month at or before the draw date — which is what
+ * puts December 2026's draw, held in January 2027, in 2026-12.
+ *
+ * If it cannot be read at all, fall back to the month before the draw date,
+ * which is the convention every row in this schema follows.
  */
-const drawMonthOfRow = (row: DrawRow): DrawMonth => row.draw_date.slice(0, 7);
+function drawMonthOfRow(row: DrawRow): DrawMonth {
+  const held = new Date(`${row.draw_date.slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(held.getTime())) return row.draw_date.slice(0, 7);
+
+  const monthBefore = (): DrawMonth => {
+    const d = new Date(Date.UTC(held.getUTCFullYear(), held.getUTCMonth() - 1, 1));
+    return d.toISOString().slice(0, 7);
+  };
+
+  const key = (row.monthly_draw ?? "").trim().toLowerCase().slice(0, 3);
+  if (key.length < 3) return monthBefore();
+  const month = MONTH_NAMES.findIndex((m) => m.startsWith(key));
+  if (month < 0) return monthBefore();
+
+  // A draw is never held before the month it is for, so a named month later in
+  // the calendar than the date it was held belongs to the previous year.
+  const year =
+    month <= held.getUTCMonth() ? held.getUTCFullYear() : held.getUTCFullYear() - 1;
+  return `${year}-${String(month + 1).padStart(2, "0")}`;
+}
+
+/** Exported for tests: the year-rollover case is easy to get wrong silently. */
+export { drawMonthOfRow };
 
 const toActivity = (r: ChallengeTypeRow, campaignId: string): Activity => ({
   // `challenge_types` is keyed by code and has no id column, so code is the id.

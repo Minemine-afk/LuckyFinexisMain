@@ -46,7 +46,7 @@ The demo campaign ships the activities from the campaign brief:
 | Successful Referral Purchase | Gold | 21 per referral |
 | Submit Referrals | Blue | 2 per referral |
 | Attend Client Events | Blue | 5 per event |
-| Bring Guests For Client Events | Blue | 10 per guest |
+| Bring Guests For Events | Blue | 10 per guest |
 | Submit A Testimonial | Blue | 3 |
 | Download finConnect | Blue | 1 |
 
@@ -97,7 +97,10 @@ following draw, never earlier.
 
 **Some activities count once per client.** Downloading the app and submitting a testimonial
 happen once; further ledger rows for them are the same event re-exported, not a second award.
-`ONCE_PER_CLIENT` in `src/lib/campaignRules.ts` names them by activity code.
+`ONCE_PER_CLIENT` in `src/lib/campaignRules.ts` names them by activity code — `finconnect`
+and `testimonial`. These must match `challenge_types.code` exactly: a code that does not
+exist makes the cap silently do nothing, which is what happened when the list was first
+written from the demo dataset's codes rather than the database's.
 
 The cap is applied **on read**, not only on import — the ledger is loaded into Supabase
 outside this portal, so duplicates already stored would otherwise keep counting. Of a
@@ -211,9 +214,13 @@ of the translation — nothing outside `src/data/` knows the database exists.
 
 Some judgement calls worth knowing about:
 
-- **The draw month comes from `draw_date`, not `monthly_draw`.** `monthly_draw` is free
-  text and may hold "August", "Aug 2026" or "2026-08" depending on who typed it, so it is
-  treated as a label rather than parsed.
+- **The draw month comes from `monthly_draw`, not `draw_date`.** This was the other way
+  round and it was wrong: `draw_date` is when the draw is *held*, and the convention in
+  this schema is the 7th of the following month — July's draw runs on 2026-08-07,
+  December's on 2027-01-07. Slicing the year-month off it put every draw one month late,
+  which shifts every pass into the neighbouring ballot. `monthly_draw` is free text, so it
+  is matched on its first three letters and paired with the year that places it at or
+  before the draw date; that is what keeps December 2026's draw out of 2027.
 - **`pass_ledger.draw_id` is read as the draw a pass is entered into**, setting the month it
   counts for. Without one, the month comes from `occurred_on`.
 - **`pass_ledger.status` is folded from free text** — anything containing "void", "cancel",

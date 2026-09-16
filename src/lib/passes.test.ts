@@ -218,7 +218,7 @@ describe("the demo dataset", () => {
     expect(byLabel["Submit Referrals"]).toBe(2);
     expect(byLabel["Attend Client Events"]).toBe(5);
     // Earlier months' passes are in earlier ballots, so they read zero here.
-    expect(byLabel["Bring Guests For Client Events"]).toBe(0);
+    expect(byLabel["Bring Guests For Events"]).toBe(0);
     expect(blue.drawn).toBe(50);
     expect(blue.awaiting).toBe(4);
   });

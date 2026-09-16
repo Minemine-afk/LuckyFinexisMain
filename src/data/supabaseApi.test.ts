@@ -34,7 +34,7 @@ vi.mock("../lib/supabase", () => ({
   MOCK_REASON: null,
 }));
 
-import { supabaseApi } from "./supabaseApi";
+import { drawMonthOfRow, supabaseApi } from "./supabaseApi";
 
 const user = (over: Record<string, unknown> = {}) => ({
   id: "auth-user-1",
@@ -135,6 +135,52 @@ describe("resuming a session on page load", () => {
       error: { message: "storage unavailable" },
     });
     await expect(supabaseApi.currentViewer()).rejects.toThrow(/Could not read your session/);
+  });
+});
+
+describe("which month a draw is for", () => {
+  /**
+   * The live schema holds each draw on the 7th of the following month, so the
+   * date it is held is never the month it is for. Getting this wrong shifts
+   * every pass into the neighbouring ballot, which is invisible until someone
+   * notices their passes are in the wrong draw.
+   */
+  const row = (monthly_draw: string | null, draw_date: string) =>
+    ({ id: "d", campaign_id: "c", monthly_draw, draw_date, pass_type: "blue", is_drawn: false });
+
+  it("reads the period from monthly_draw, not the date it is held", () => {
+    expect(drawMonthOfRow(row("July", "2026-08-07"))).toBe("2026-07");
+    expect(drawMonthOfRow(row("August", "2026-09-07"))).toBe("2026-08");
+    expect(drawMonthOfRow(row("September", "2026-10-07"))).toBe("2026-09");
+  });
+
+  it("keeps December in its own year when the draw runs in January", () => {
+    expect(drawMonthOfRow(row("December", "2027-01-07"))).toBe("2026-12");
+  });
+
+  it("copes with a draw held inside its own month", () => {
+    expect(drawMonthOfRow(row("September", "2026-09-30"))).toBe("2026-09");
+  });
+
+  it("matches loosely, because the column is free text", () => {
+    expect(drawMonthOfRow(row("Sept", "2026-10-07"))).toBe("2026-09");
+    expect(drawMonthOfRow(row("  august  ", "2026-09-07"))).toBe("2026-08");
+    expect(drawMonthOfRow(row("AUGUST 2026", "2026-09-07"))).toBe("2026-08");
+  });
+
+  it("falls back to the month before the draw when the label is unusable", () => {
+    expect(drawMonthOfRow(row(null, "2026-09-07"))).toBe("2026-08");
+    expect(drawMonthOfRow(row("", "2026-09-07"))).toBe("2026-08");
+    expect(drawMonthOfRow(row("Q3", "2026-09-07"))).toBe("2026-08");
+    // Including across a year boundary.
+    expect(drawMonthOfRow(row(null, "2027-01-07"))).toBe("2026-12");
+  });
+
+  it("leaves a draw it cannot place unmatchable rather than guessing", () => {
+    // The year has to come from the date, so a broken date means the month
+    // cannot be resolved at all. Returning something that looks like a real
+    // month would let this draw quietly claim another month's passes.
+    expect(drawMonthOfRow(row("July", "not-a-date"))).not.toMatch(/^\d{4}-\d{2}$/);
   });
 });
 

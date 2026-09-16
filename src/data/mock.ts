@@ -81,7 +81,7 @@ const rateCard: Omit<Activity, "oncePerClient">[] = [
   {
     id: "act-gold-purchase",
     campaignId: CAMPAIGN_ID,
-    code: "purchase_qualifying_product",
+    code: "purchase_product",
     label: "Purchase Qualifying Product",
     passType: "gold",
     passesPerUnit: 21,
@@ -91,7 +91,7 @@ const rateCard: Omit<Activity, "oncePerClient">[] = [
   {
     id: "act-gold-referral-purchase",
     campaignId: CAMPAIGN_ID,
-    code: "successful_referral_purchase",
+    code: "referral_purchase",
     label: "Successful Referral Purchase",
     passType: "gold",
     passesPerUnit: 21,
@@ -111,7 +111,7 @@ const rateCard: Omit<Activity, "oncePerClient">[] = [
   {
     id: "act-blue-event",
     campaignId: CAMPAIGN_ID,
-    code: "attend_client_event",
+    code: "attend_event",
     label: "Attend Client Events",
     passType: "blue",
     passesPerUnit: 5,
@@ -121,8 +121,8 @@ const rateCard: Omit<Activity, "oncePerClient">[] = [
   {
     id: "act-blue-guest",
     campaignId: CAMPAIGN_ID,
-    code: "bring_guest_to_event",
-    label: "Bring Guests For Client Events",
+    code: "bring_guest",
+    label: "Bring Guests For Events",
     passType: "blue",
     passesPerUnit: 10,
     unitLabel: "Guest",
@@ -131,21 +131,21 @@ const rateCard: Omit<Activity, "oncePerClient">[] = [
   {
     id: "act-blue-testimonial",
     campaignId: CAMPAIGN_ID,
-    code: "submit_testimonial",
+    code: "testimonial",
     label: "Submit A Testimonial",
     passType: "blue",
     passesPerUnit: 3,
-    unitLabel: null,
+    unitLabel: "Submission",
     sortOrder: 60,
   },
   {
     id: "act-blue-finconnect",
     campaignId: CAMPAIGN_ID,
-    code: "download_finconnect",
+    code: "finconnect",
     label: "Download finConnect",
     passType: "blue",
     passesPerUnit: 1,
-    unitLabel: null,
+    unitLabel: "Download",
     sortOrder: 70,
   },
 ];
