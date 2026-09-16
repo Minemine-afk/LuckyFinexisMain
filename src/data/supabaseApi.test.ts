@@ -201,51 +201,6 @@ describe("changing your own account", () => {
     expect(mocks.auth.updateUser).not.toHaveBeenCalled();
   });
 
-  it("proves the current password before changing the sign-in email too", async () => {
-    vi.stubGlobal("window", { location: { origin: "https://luckyfinexismain.pages.dev" } });
-    try {
-      const result = await supabaseApi.changeEmail("old-one", "  New@Finexis.example  ");
-
-      expect(mocks.auth.signInWithPassword).toHaveBeenCalled();
-      expect(mocks.auth.updateUser).toHaveBeenCalledWith(
-        { email: "New@Finexis.example" },
-        { emailRedirectTo: "https://luckyfinexismain.pages.dev/profile" },
-      );
-      expect(result.sentTo).toBe("New@Finexis.example");
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it("works without a browser, for reuse outside one", async () => {
-    // No window stubbed: the redirect is simply omitted and Supabase falls back
-    // to the project's Site URL.
-    await supabaseApi.changeEmail("old-one", "new@finexis.example");
-    expect(mocks.auth.updateUser).toHaveBeenCalledWith(
-      { email: "new@finexis.example" },
-      { emailRedirectTo: undefined },
-    );
-  });
-
-  it("does not change the email when the current password is wrong", async () => {
-    mocks.auth.signInWithPassword.mockResolvedValue({
-      data: { user: null },
-      error: { message: "Invalid login credentials", status: 400 },
-    });
-
-    await expect(supabaseApi.changeEmail("wrong", "new@finexis.example")).rejects.toThrow(
-      /not your current password/i,
-    );
-    expect(mocks.auth.updateUser).not.toHaveBeenCalled();
-  });
-
-  it("refuses an email that is already the one in use, whatever its case", async () => {
-    await expect(supabaseApi.changeEmail("old-one", "AMY@finexis.EXAMPLE")).rejects.toThrow(
-      /already your sign-in email/i,
-    );
-    expect(mocks.auth.updateUser).not.toHaveBeenCalled();
-  });
-
   it("refuses to act at all when the session has gone", async () => {
     mocks.auth.getSession.mockResolvedValue({ data: { session: null }, error: null });
 

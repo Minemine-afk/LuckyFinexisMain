@@ -4,91 +4,61 @@ import { Alert } from "../components/Loading";
 import { api } from "../data";
 
 /**
- * The signed-in user's own account: the sign-in email, and the password.
+ * The signed-in user's own account.
  *
- * Both changes require the current password. Supabase will make either on the
- * strength of a session alone, which would make an unattended laptop enough to
- * take a consultant's account away from them — so the re-check happens here.
+ * Changing the password requires the current one. Supabase will change it on
+ * the strength of a session alone, which would make an unattended laptop enough
+ * to take a consultant's account away from them — so the re-check happens here.
  *
  * Nothing on this page touches campaign data. It is deliberately the only place
- * in the portal that writes anything.
+ * in the portal that writes anything, and it writes only to the signed-in
+ * user's own auth record.
  */
 
 /** Long enough to be worth having. Supabase's own floor is lower; this wins. */
 const MIN_PASSWORD = 12;
 
-const looksLikeEmail = (value: string): boolean => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-
 export function ProfilePage() {
   const { viewer } = useAuth();
-
-  const [emailPassword, setEmailPassword] = useState("");
-  const [newEmail, setNewEmail] = useState("");
-  const [emailBusy, setEmailBusy] = useState(false);
-  const [emailError, setEmailError] = useState<string | null>(null);
-  const [emailSent, setEmailSent] = useState<string | null>(null);
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [pwBusy, setPwBusy] = useState(false);
-  const [pwError, setPwError] = useState<string | null>(null);
-  const [pwDone, setPwDone] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
 
   if (!viewer) return null;
 
-  async function submitEmail(e: FormEvent) {
+  async function submit(e: FormEvent) {
     e.preventDefault();
-    setEmailError(null);
-    setEmailSent(null);
-
-    if (!looksLikeEmail(newEmail)) {
-      setEmailError("Enter a valid email address.");
-      return;
-    }
-
-    setEmailBusy(true);
-    try {
-      const { sentTo } = await api.changeEmail(emailPassword, newEmail);
-      setEmailSent(sentTo);
-      setEmailPassword("");
-      setNewEmail("");
-    } catch (err) {
-      setEmailError(err instanceof Error ? err.message : "The change could not be saved.");
-    } finally {
-      setEmailBusy(false);
-    }
-  }
-
-  async function submitPassword(e: FormEvent) {
-    e.preventDefault();
-    setPwError(null);
-    setPwDone(false);
+    setError(null);
+    setDone(false);
 
     if (newPassword.length < MIN_PASSWORD) {
-      setPwError(`Use at least ${MIN_PASSWORD} characters.`);
+      setError(`Use at least ${MIN_PASSWORD} characters.`);
       return;
     }
     if (newPassword !== confirmPassword) {
-      setPwError("The two new passwords do not match.");
+      setError("The two new passwords do not match.");
       return;
     }
     if (newPassword === currentPassword) {
-      setPwError("The new password must be different from the current one.");
+      setError("The new password must be different from the current one.");
       return;
     }
 
-    setPwBusy(true);
+    setBusy(true);
     try {
       await api.changePassword(currentPassword, newPassword);
-      setPwDone(true);
+      setDone(true);
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
     } catch (err) {
-      setPwError(err instanceof Error ? err.message : "The password could not be changed.");
+      setError(err instanceof Error ? err.message : "The password could not be changed.");
     } finally {
-      setPwBusy(false);
+      setBusy(false);
     }
   }
 
@@ -96,84 +66,45 @@ export function ProfilePage() {
     <div className="page">
       <header className="page-head">
         <h1>Your account</h1>
-        <p className="sub">
-          Signed in as <b>{viewer.fullName}</b> ·{" "}
-          {viewer.role === "admin" ? "Administrator" : "Consultant"}
-        </p>
       </header>
 
-      <div className="account-grid">
+      <div className="account-col">
         <section className="card">
           <div className="card-pad">
-            <h2 className="card-title">Sign-in email</h2>
-            <p className="card-note">
-              This is the address you sign in with. Changing it sends a confirmation
-              link — <b>your current address keeps working until you follow it</b>. If
-              your Supabase project has secure email change switched on, a link goes to
-              your current address too and both have to be confirmed.
+            <h2 className="card-title">Details</h2>
+            <dl className="detail-list">
+              <div>
+                <dt>Name</dt>
+                <dd>{viewer.fullName}</dd>
+              </div>
+              <div>
+                <dt>Role</dt>
+                <dd>{viewer.role === "admin" ? "Administrator" : "Consultant"}</dd>
+              </div>
+              <div>
+                <dt>Sign-in email</dt>
+                <dd className="mono">{viewer.email}</dd>
+              </div>
+            </dl>
+            <p className="card-note" style={{ margin: "16px 0 0" }}>
+              These are set by your administrator. Ask them to change your name or the
+              address you sign in with.
             </p>
-
-            {emailError && <Alert kind="err">{emailError}</Alert>}
-            {emailSent && (
-              <Alert kind="ok">
-                Confirmation sent to <b>{emailSent}</b>. Nothing has changed yet.
-              </Alert>
-            )}
-
-            <form onSubmit={submitEmail} noValidate>
-              <div className="field">
-                <label htmlFor="current-email">Current email</label>
-                <input id="current-email" type="email" value={viewer.email} disabled readOnly />
-              </div>
-
-              <div className="field">
-                <label htmlFor="new-email">New email</label>
-                <input
-                  id="new-email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  value={newEmail}
-                  onChange={(e) => setNewEmail(e.target.value)}
-                />
-              </div>
-
-              <div className="field">
-                <label htmlFor="email-password">Your current password</label>
-                <input
-                  id="email-password"
-                  type="password"
-                  autoComplete="current-password"
-                  required
-                  value={emailPassword}
-                  onChange={(e) => setEmailPassword(e.target.value)}
-                />
-                <p className="hint">
-                  Asked for because changing the sign-in email changes who can get into
-                  this account.
-                </p>
-              </div>
-
-              <button className="btn" type="submit" disabled={emailBusy}>
-                {emailBusy ? <span className="spinner" /> : null}
-                {emailBusy ? "Sending…" : "Send confirmation"}
-              </button>
-            </form>
           </div>
         </section>
 
         <section className="card">
           <div className="card-pad">
-            <h2 className="card-title">Password</h2>
+            <h2 className="card-title">Change password</h2>
             <p className="card-note">
-              Changing your password signs you out of other browsers and devices.
-              At least {MIN_PASSWORD} characters.
+              At least {MIN_PASSWORD} characters. Changing it signs you out of other
+              browsers and devices.
             </p>
 
-            {pwError && <Alert kind="err">{pwError}</Alert>}
-            {pwDone && <Alert kind="ok">Your password has been changed.</Alert>}
+            {error && <Alert kind="err">{error}</Alert>}
+            {done && <Alert kind="ok">Your password has been changed.</Alert>}
 
-            <form onSubmit={submitPassword} noValidate>
+            <form onSubmit={submit} noValidate>
               <div className="field">
                 <label htmlFor="current-password">Current password</label>
                 <input
@@ -184,6 +115,10 @@ export function ProfilePage() {
                   value={currentPassword}
                   onChange={(e) => setCurrentPassword(e.target.value)}
                 />
+                <p className="hint">
+                  Asked for so that an unattended screen is not enough to take over
+                  this account.
+                </p>
               </div>
 
               <div className="field">
@@ -211,9 +146,9 @@ export function ProfilePage() {
                 />
               </div>
 
-              <button className="btn" type="submit" disabled={pwBusy}>
-                {pwBusy ? <span className="spinner" /> : null}
-                {pwBusy ? "Changing…" : "Change password"}
+              <button className="btn" type="submit" disabled={busy}>
+                {busy ? <span className="spinner" /> : null}
+                {busy ? "Changing…" : "Change password"}
               </button>
             </form>
           </div>

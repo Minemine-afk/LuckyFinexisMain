@@ -15,12 +15,6 @@ export interface CommitResult {
   skipped: number;
 }
 
-/** What came of asking to change the sign-in email. */
-export interface EmailChange {
-  /** The address the confirmation link went to. */
-  sentTo: string;
-}
-
 /**
  * Everything the UI is allowed to know about where data comes from.
  *
@@ -56,15 +50,6 @@ export interface PortalApi {
    * enough to take a consultant's account away from them.
    */
   changePassword(currentPassword: string, newPassword: string): Promise<void>;
-
-  /**
-   * Ask to change the sign-in email. Also gated on the current password —
-   * changing the sign-in identity is at least as sensitive as the password.
-   *
-   * Nothing changes until the link in the confirmation email is followed; the
-   * current address keeps working until then.
-   */
-  changeEmail(currentPassword: string, newEmail: string): Promise<EmailChange>;
 
   getCampaign(): Promise<Campaign>;
   getActivities(campaignId: string): Promise<Activity[]>;

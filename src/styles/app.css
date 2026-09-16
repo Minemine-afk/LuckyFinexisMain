@@ -1123,42 +1123,70 @@ dialog.modal.wide {
 
 /* ---------------------------------------------------------------- account page */
 
-/* Two independent changes, side by side on a wide screen and stacked on a
-   narrow one. Deliberately not one long form: they are separate decisions with
-   separate consequences, and submitting one must not imply the other. */
-.account-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+/* A form, not a dashboard: held to a readable width rather than stretched
+   across the page. */
+.account-col {
+  display: flex;
+  flex-direction: column;
   gap: 18px;
-  align-items: start;
+  max-width: 560px;
 }
 
-.account-grid .card-title {
+.account-col .card-title {
   font-size: 17px;
   margin: 0 0 6px;
 }
 
-.account-grid .card-note {
+.account-col .card-note {
   margin: 0 0 18px;
   font-size: 13px;
   line-height: 1.55;
   color: var(--ink-2);
 }
 
-.account-grid .field input:disabled {
-  background: var(--surface-2);
-  color: var(--ink-3);
-  cursor: not-allowed;
-}
-
-.account-grid .hint {
+.account-col .hint {
   margin: 6px 0 0;
   font-size: 12px;
   color: var(--ink-3);
 }
 
-.account-grid .alert {
+.account-col .alert {
   margin-bottom: 14px;
+}
+
+.detail-list {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--line-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.detail-list > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  justify-content: space-between;
+  align-items: baseline;
+  background: var(--surface);
+  padding: 11px 14px;
+}
+
+.detail-list dt {
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+.detail-list dd {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 
 /* ---------------------------------------------------------------- account bar */

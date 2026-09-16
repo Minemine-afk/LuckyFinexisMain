@@ -509,29 +509,6 @@ export const supabaseApi: PortalApi = {
     }
   },
 
-  async changeEmail(currentPassword, newEmail) {
-    const current = await reauthenticate(currentPassword);
-    const next = newEmail.trim();
-    if (next.toLowerCase() === current.toLowerCase()) {
-      throw new ApiError("That is already your sign-in email.");
-    }
-
-    // Land them back on the page they started from. The URL has to be in the
-    // project's redirect allow-list or Supabase refuses it. Guarded because
-    // this provider has no business assuming a browser — the same code is meant
-    // to be reusable from a Pages Function, where `window` does not exist and
-    // Supabase falls back to the project's Site URL.
-    const emailRedirectTo =
-      typeof window === "undefined" ? undefined : `${window.location.origin}/profile`;
-
-    const { error } = await supabase().auth.updateUser({ email: next }, { emailRedirectTo });
-    if (error) {
-      console.error("[auth] email change failed:", error.message);
-      throw new ApiError(error.message, error.status);
-    }
-
-    return { sentTo: next };
-  },
 
   async getCampaign(): Promise<Campaign> {
     const db = supabase();
