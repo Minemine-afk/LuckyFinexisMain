@@ -103,7 +103,3 @@ export function useAuth(): AuthState {
   if (!ctx) throw new Error("useAuth must be used inside <AuthProvider>.");
   return ctx;
 }
-
-/** Where each role lands after signing in. */
-export const homePathFor = (viewer: Viewer): string =>
-  viewer.role === "advisor" ? "/clients" : "/admin";

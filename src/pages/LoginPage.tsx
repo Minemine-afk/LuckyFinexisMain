@@ -1,15 +1,11 @@
 import { useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
-import { homePathFor, useAuth } from "../auth/AuthProvider";
+import { useAuth } from "../auth/AuthProvider";
+import { homePathFor } from "../auth/access";
 import { Alert, Loading } from "../components/Loading";
 import { PlaneIcon } from "../components/Icons";
 import { DEMO_ACCOUNTS } from "../data/mockApi";
 import { USE_MOCK } from "../data";
-
-const ROLE_LABEL: Record<string, string> = {
-  advisor: "Consultant",
-  admin: "Admin",
-};
 
 /**
  * One sign-in form for both roles. Which portal you land on is decided by the
@@ -112,7 +108,7 @@ export function LoginPage() {
                   <br />
                   <span className="mono">{a.email}</span>
                 </span>
-                <span className="badge blue">{ROLE_LABEL[a.role] ?? a.role}</span>
+                <span className="badge blue">{a.role}</span>
               </button>
             ))}
             <p style={{ fontSize: 12, color: "var(--ink-3)", margin: "8px 0 0" }}>

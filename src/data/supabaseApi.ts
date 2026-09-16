@@ -23,7 +23,6 @@ import type {
   PassEvent,
   PassStatus,
   PassType,
-  Role,
   Viewer,
 } from "../lib/types";
 import { ApiError, type CommitResult, type PortalApi } from "./api";
@@ -316,9 +315,11 @@ async function resolveViewer(
   appMetadata: Record<string, unknown> | undefined,
 ): Promise<Viewer> {
   const db = supabase();
-  const declared = appMetadata?.role;
-  const role: Role | null =
-    declared === "admin" || declared === "advisor" ? declared : null;
+  // `app_metadata` is the only place an admin claim is honoured, because it is
+  // the only part of the JWT a user cannot write. Someone setting
+  // `user_metadata.role` to "admin" gets nothing. A consultant is not claimed at
+  // all — it is decided by having a row in `advisors`, below.
+  const isAdmin = appMetadata?.role === "admin";
 
   const { data: advisor, error } = await db
     .from("advisors")
@@ -335,12 +336,18 @@ async function resolveViewer(
     throw new ApiError("Could not sign you in. Please try again in a moment.");
   }
 
-  if (role === "admin") {
-    return { userId, email, role: "admin", fullName: advisor?.fc_name ?? email, advisorId: advisor?.id ?? null };
-  }
-
-  if (advisor) {
-    return { userId, email, role: "advisor", fullName: advisor.fc_name, advisorId: advisor.id };
+  // Both facts, reported independently. The admin claim used to be checked
+  // first and returned early, so an account holding both came back as an admin
+  // with no client book — which is how granting the claim to a practising
+  // consultant took their own clients away from them.
+  if (isAdmin || advisor) {
+    return {
+      userId,
+      email,
+      fullName: advisor?.fc_name ?? email,
+      advisorId: advisor?.id ?? null,
+      isAdmin,
+    };
   }
 
   // Row level security returns an empty result rather than an error when it

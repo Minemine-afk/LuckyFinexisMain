@@ -73,7 +73,11 @@ describe("signing in", () => {
     advisorRow({ id: "adv-1", fc_name: "Amy Santiago" });
     const viewer = await supabaseApi.signIn("amy@finexis.example", "pw");
 
-    expect(viewer).toMatchObject({ role: "advisor", advisorId: "adv-1", fullName: "Amy Santiago" });
+    expect(viewer).toMatchObject({
+      advisorId: "adv-1",
+      isAdmin: false,
+      fullName: "Amy Santiago",
+    });
     expect(mocks.auth.signOut).not.toHaveBeenCalled();
   });
 
@@ -129,8 +133,40 @@ describe("signing in", () => {
     noAdvisorRow();
 
     const viewer = await supabaseApi.signIn("holt@finexis.example", "pw");
-    expect(viewer.role).toBe("admin");
+    expect(viewer).toMatchObject({ isAdmin: true, advisorId: null });
     expect(mocks.auth.signOut).not.toHaveBeenCalled();
+  });
+
+  it("reports the admin claim and the client book as two separate facts", async () => {
+    // The case that used to be impossible to express. Checking the claim first
+    // and returning early meant a consultant granted admin came back with
+    // advisorId null — so the app took their own client book away from them.
+    mocks.auth.signInWithPassword.mockResolvedValue({
+      data: { user: user({ app_metadata: { role: "admin" } }) },
+      error: null,
+    });
+    advisorRow({ id: "adv-1", fc_name: "Amy Santiago" });
+
+    const viewer = await supabaseApi.signIn("amy@finexis.example", "pw");
+    expect(viewer).toMatchObject({
+      isAdmin: true,
+      advisorId: "adv-1",
+      fullName: "Amy Santiago",
+    });
+  });
+
+  it("ignores an admin role claimed anywhere a user can write it", async () => {
+    // user_metadata is editable by the account holder; app_metadata is not.
+    mocks.auth.signInWithPassword.mockResolvedValue({
+      data: {
+        user: { ...user(), app_metadata: {}, user_metadata: { role: "admin" } },
+      },
+      error: null,
+    });
+    advisorRow({ id: "adv-1", fc_name: "Amy Santiago" });
+
+    const viewer = await supabaseApi.signIn("amy@finexis.example", "pw");
+    expect(viewer.isAdmin).toBe(false);
   });
 
   it("does not try to end a session that was never created", async () => {

@@ -1,3 +1,4 @@
+import { roleLabel } from "../auth/access";
 import { parseCsv } from "../lib/csv";
 import {
   buildPreview,
@@ -257,7 +258,7 @@ export const resetMockLedger = (): void => {
 
 export const DEMO_ACCOUNTS = seed.demoViewers.map((v) => ({
   email: v.email,
-  role: v.role,
+  role: roleLabel(v),
   name: v.fullName,
   password: DEMO_PASSWORD,
 }));

@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
-import { AuthProvider, homePathFor, useAuth } from "./auth/AuthProvider";
-import { RequireRole } from "./auth/RequireRole";
+import { AuthProvider, useAuth } from "./auth/AuthProvider";
+import { homePathFor } from "./auth/access";
+import { RequireAccess } from "./auth/RequireAccess";
 import { AppShell } from "./components/AppShell";
 import { Loading } from "./components/Loading";
 import { AdminPage } from "./pages/AdminPage";
@@ -39,22 +40,22 @@ export default function App() {
           <Route
             path="/clients"
             element={
-              <RequireRole roles={["advisor"]}>
+              <RequireAccess allow={["clients"]}>
                 <AppShell>
                   <AdvisorPage />
                 </AppShell>
-              </RequireRole>
+              </RequireAccess>
             }
           />
 
           <Route
             path="/admin"
             element={
-              <RequireRole roles={["admin"]}>
+              <RequireAccess allow={["admin"]}>
                 <AppShell>
                   <AdminPage />
                 </AppShell>
-              </RequireRole>
+              </RequireAccess>
             }
           />
 
@@ -62,11 +63,11 @@ export default function App() {
           <Route
             path="/profile"
             element={
-              <RequireRole roles={["advisor", "admin"]}>
+              <RequireAccess allow={["clients", "admin"]}>
                 <AppShell>
                   <ProfilePage />
                 </AppShell>
-              </RequireRole>
+              </RequireAccess>
             }
           />
 
