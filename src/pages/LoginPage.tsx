@@ -16,7 +16,7 @@ const ROLE_LABEL: Record<string, string> = {
  * role on your record, not by which form you used.
  */
 export function LoginPage() {
-  const { viewer, loading, signIn } = useAuth();
+  const { viewer, loading, sessionEnded, signIn } = useAuth();
   const navigate = useNavigate();
   const location = useLocation() as { state?: { from?: string } };
 
@@ -52,6 +52,14 @@ export function LoginPage() {
         <p className="sub">
           Financial consultants and campaign administrators sign in here.
         </p>
+
+        {/* Landing back here without having asked to needs an explanation, or it
+            reads as the app having lost your work. */}
+        {sessionEnded && !error && (
+          <Alert kind="info">
+            Your session has ended. Please sign in again to carry on.
+          </Alert>
+        )}
 
         {error && <Alert kind="err">{error}</Alert>}
 

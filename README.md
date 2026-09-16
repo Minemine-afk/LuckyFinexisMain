@@ -156,6 +156,27 @@ avoids showing someone a page of failed queries, not a security boundary.
 Privileged writes never happen from the browser. The service role key belongs only in a Worker
 secret. Anything named `VITE_*` is compiled into the JavaScript the browser downloads.
 
+### Sessions
+
+A session must never outlive the app's willingness to use it. `signInWithPassword` writes a
+session to browser storage *before* anything knows whether the account maps to a consultant
+record, so every path that refuses a user — no `advisors` row, an unreadable `advisors`
+table — calls `signOut()` on the way out. Without that, a refused sign-in leaves a live,
+auto-refreshing token in `localStorage` while the app reports the user as signed out: a
+session nobody can see and nothing ends.
+
+`onSessionChange` watches for the session ending underneath the app — an expired or revoked
+token, a failed refresh, a sign-out in another tab — and on a token refresh re-checks that
+the account still resolves, which is what catches an advisor record removed mid-session.
+
+This matters more than it looks, because **row level security answers a denied read with an
+empty result, not an error**. A dead session does not produce a single error message; it
+produces a consultant being told their book is empty. The watch is what turns that into
+"your session has ended, please sign in again".
+
+Grants are `SELECT` to `authenticated` only. `anon` is revoked: the app never queries before
+sign-in, so an anonymous key should reach nothing at all.
+
 ### Layout
 
 ```

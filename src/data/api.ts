@@ -28,6 +28,19 @@ export interface PortalApi {
   signOut(): Promise<void>;
   /** Resolve an existing session on page load; null when signed out. */
   currentViewer(): Promise<Viewer | null>;
+  /**
+   * Watch the session for ending underneath the app — an expired or revoked
+   * token, a refresh that failed, a sign-out in another tab, or a consultant
+   * record that has stopped resolving.
+   *
+   * Without this the app only ever checks at page load, and a session that dies
+   * mid-visit leaves the UI signed in: row level security answers a denied read
+   * with an empty result rather than an error, so the consultant is told their
+   * book is empty instead of being asked to sign in again.
+   *
+   * Returns an unsubscribe function.
+   */
+  onSessionChange(handler: (viewer: Viewer | null) => void): () => void;
 
   getCampaign(): Promise<Campaign>;
   getActivities(campaignId: string): Promise<Activity[]>;

@@ -131,6 +131,22 @@ export const mockApi: PortalApi = {
     return seed.demoViewers.find((v) => v.userId === id) ?? null;
   },
 
+  onSessionChange(handler) {
+    // Demo sessions never expire, so there is nothing to poll. What can still
+    // happen is a sign-out in another tab, which the storage event carries.
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== null && e.key !== SESSION_KEY) return;
+      const id = readStore("session", SESSION_KEY);
+      handler(id ? seed.demoViewers.find((v) => v.userId === id) ?? null : null);
+    };
+    try {
+      window.addEventListener("storage", onStorage);
+    } catch {
+      return () => {};
+    }
+    return () => window.removeEventListener("storage", onStorage);
+  },
+
   async getCampaign(): Promise<Campaign> {
     return delay(seed.campaign);
   },

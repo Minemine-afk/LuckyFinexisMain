@@ -245,6 +245,37 @@ async function resolveViewer(
   );
 }
 
+/**
+ * Resolve a session to a viewer, and end the session if it will not resolve.
+ *
+ * `signInWithPassword` persists a session before anything knows whether the
+ * account is linked to a consultant record. Without this, a sign-in refused by
+ * `resolveViewer` leaves a live, auto-refreshing token in the browser while the
+ * app reports the user as signed out — a session nobody can see and nothing
+ * ends, carrying whatever the `authenticated` role is granted.
+ */
+async function resolveOrEndSession(
+  user: { id: string; email?: string | null; app_metadata?: unknown },
+  fallbackEmail: string,
+): Promise<Viewer> {
+  try {
+    return await resolveViewer(
+      user.id,
+      user.email ?? fallbackEmail,
+      user.app_metadata as Record<string, unknown> | undefined,
+    );
+  } catch (err) {
+    // Best effort. The session must not outlive a failed resolution, but a
+    // network error on the way out must not replace the real reason.
+    try {
+      await supabase().auth.signOut();
+    } catch {
+      /* the caller's error is the one worth reporting */
+    }
+    throw err;
+  }
+}
+
 /* ---------- provider ---------- */
 
 export const supabaseApi: PortalApi = {
@@ -256,11 +287,7 @@ export const supabaseApi: PortalApi = {
     if (error || !data.user) {
       throw new ApiError(error?.message ?? "Could not sign you in.", error?.status);
     }
-    return resolveViewer(
-      data.user.id,
-      data.user.email ?? email,
-      data.user.app_metadata as Record<string, unknown> | undefined,
-    );
+    return resolveOrEndSession(data.user, email);
   },
 
   async signOut() {
@@ -268,14 +295,41 @@ export const supabaseApi: PortalApi = {
   },
 
   async currentViewer() {
-    const { data } = await supabase().auth.getSession();
+    const { data, error } = await supabase().auth.getSession();
+    // A session that cannot be read at all is not the same as no session:
+    // storage blocked, or a refresh that failed. Say so rather than showing the
+    // login page as though the user had simply never signed in.
+    if (error) {
+      throw new ApiError(`Could not read your session: ${error.message}`);
+    }
     const user = data.session?.user;
     if (!user) return null;
-    return resolveViewer(
-      user.id,
-      user.email ?? "",
-      user.app_metadata as Record<string, unknown> | undefined,
-    );
+    return resolveOrEndSession(user, "");
+  },
+
+  onSessionChange(handler) {
+    const { data } = supabase().auth.onAuthStateChange((event, session) => {
+      // Sign-in is already handled by whoever called signIn, and re-resolving
+      // here would race with it.
+      if (event === "SIGNED_IN") return;
+
+      if (!session?.user || event === "SIGNED_OUT") {
+        handler(null);
+        return;
+      }
+
+      // On a refresh — roughly hourly — re-check that the account still
+      // resolves. This is what catches an advisor record that has been removed
+      // or a role that has changed since the page was opened; without it the
+      // only check is at page load and a stale viewer can live for days.
+      if (event === "TOKEN_REFRESHED" || event === "USER_UPDATED") {
+        void resolveOrEndSession(session.user, "")
+          .then(handler)
+          .catch(() => handler(null));
+      }
+    });
+
+    return () => data.subscription.unsubscribe();
   },
 
   async getCampaign(): Promise<Campaign> {
