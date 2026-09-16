@@ -1,7 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import type { ReactNode } from "react";
-import { useAuth } from "../auth/AuthProvider";
-import { can } from "../auth/access";
+import { homePathFor, useAuth } from "../auth/AuthProvider";
 import { USE_MOCK } from "../data";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { MOCK_REASON } from "../lib/supabase";
@@ -25,10 +24,10 @@ const initials = (name: string): string =>
     .join("");
 
 /**
- * The left icon rail from the mockup. The pages this account can open lead
- * somewhere; the rest are the surrounding product's navigation, shown so the
- * page sits in its real context but explicitly disabled rather than wired to
- * dead routes.
+ * The left icon rail from the mockup. Only the campaign icon (and, for admins,
+ * the upload icon) leads anywhere — the rest are the surrounding product's
+ * navigation, shown so the page sits in its real context but explicitly
+ * disabled rather than wired to dead routes.
  */
 export function AppShell({ children }: { children: ReactNode }) {
   const { viewer, signOut } = useAuth();
@@ -36,6 +35,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const location = useLocation();
 
   if (!viewer) return <>{children}</>;
+
+  const home = homePathFor(viewer);
 
   const endSession = () => {
     void signOut().then(() => navigate("/login", { replace: true }));
@@ -72,30 +73,22 @@ export function AppShell({ children }: { children: ReactNode }) {
             {initials(viewer.fullName)}
           </span>
 
-          {/* One button per page this account can actually open, and both show
-              for someone who is a consultant and an administrator — which is a
-              normal thing to be, and used to mean choosing one. `aria-current`
-              follows the route rather than being fixed to the first button, so
-              the rail says where you are instead of always saying "Campaign". */}
-          {can(viewer, "clients") && (
-            <button
-              type="button"
-              className="rail-btn"
-              aria-current={location.pathname === "/clients" ? "page" : undefined}
-              title="Your clients"
-              onClick={() => navigate("/clients")}
-            >
-              <GiftIcon />
-              <span className="sr-only">Your clients</span>
-            </button>
-          )}
+          <button
+            type="button"
+            className="rail-btn"
+            aria-current="page"
+            title="Campaign"
+            onClick={() => navigate(home)}
+          >
+            <GiftIcon />
+            <span className="sr-only">Campaign</span>
+          </button>
 
-          {can(viewer, "admin") && (
+          {viewer.role === "admin" && (
             <button
               type="button"
               className="rail-btn"
-              aria-current={location.pathname === "/admin" ? "page" : undefined}
-              title="Campaign data — upload pass activity"
+              title="Campaign data"
               onClick={() => navigate("/admin")}
             >
               <UploadIcon />
@@ -106,7 +99,6 @@ export function AppShell({ children }: { children: ReactNode }) {
           <button
             type="button"
             className="rail-btn"
-            aria-current={location.pathname === "/profile" ? "page" : undefined}
             title="Your account"
             onClick={() => navigate("/profile")}
           >

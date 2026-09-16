@@ -1,6 +1,5 @@
 import { useState, type FormEvent } from "react";
 import { useAuth } from "../auth/AuthProvider";
-import { roleLabel } from "../auth/access";
 import { Alert } from "../components/Loading";
 import { api } from "../data";
 
@@ -80,7 +79,7 @@ export function ProfilePage() {
               </div>
               <div>
                 <dt>Role</dt>
-                <dd>{roleLabel(viewer)}</dd>
+                <dd>{viewer.role === "admin" ? "Administrator" : "Consultant"}</dd>
               </div>
               <div>
                 <dt>Sign-in email</dt>

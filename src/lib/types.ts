@@ -145,30 +145,15 @@ export interface DrawWinner {
   passType: PassType;
 }
 
-/**
- * The signed-in user, as two independent facts rather than one role.
- *
- * They really are independent: the admin claim lives in `app_metadata`, the
- * consultant record lives in the `advisors` table, and one person can hold
- * both. A single `role` field could only ever report one of them, so granting
- * an admin claim to a practising consultant silently took their client book
- * away — the page they landed on changed, and `/clients` bounced them back.
- *
- * Everything the app gates on now asks which of these is true, not which name
- * the account goes by.
- */
+/** The signed-in user, resolved to the record their role hangs off. */
 export interface Viewer {
   userId: string;
   email: string;
+  role: Role;
   fullName: string;
-  /** Non-null when this account has a consultant record, and so a client book. */
+  /** Set when role === "advisor". */
   advisorId: string | null;
-  /** True when `app_metadata.role` is "admin" — the only place it can be claimed. */
-  isAdmin: boolean;
 }
-
-/** What a page needs of a viewer. See `can` in `AuthProvider`. */
-export type Capability = "clients" | "admin";
 
 /** One row of the advisor's client table. `gold`/`blue` are live passes only. */
 export interface AdvisorClientRow {

@@ -23,6 +23,7 @@ import type {
   PassEvent,
   PassStatus,
   PassType,
+  Role,
   Viewer,
 } from "../lib/types";
 import { ApiError, type CommitResult, type PortalApi } from "./api";
@@ -315,11 +316,9 @@ async function resolveViewer(
   appMetadata: Record<string, unknown> | undefined,
 ): Promise<Viewer> {
   const db = supabase();
-  // `app_metadata` is the only place an admin claim is honoured, because it is
-  // the only part of the JWT a user cannot write. Someone setting
-  // `user_metadata.role` to "admin" gets nothing. A consultant is not claimed at
-  // all — it is decided by having a row in `advisors`, below.
-  const isAdmin = appMetadata?.role === "admin";
+  const declared = appMetadata?.role;
+  const role: Role | null =
+    declared === "admin" || declared === "advisor" ? declared : null;
 
   const { data: advisor, error } = await db
     .from("advisors")
@@ -336,18 +335,12 @@ async function resolveViewer(
     throw new ApiError("Could not sign you in. Please try again in a moment.");
   }
 
-  // Both facts, reported independently. The admin claim used to be checked
-  // first and returned early, so an account holding both came back as an admin
-  // with no client book — which is how granting the claim to a practising
-  // consultant took their own clients away from them.
-  if (isAdmin || advisor) {
-    return {
-      userId,
-      email,
-      fullName: advisor?.fc_name ?? email,
-      advisorId: advisor?.id ?? null,
-      isAdmin,
-    };
+  if (role === "admin") {
+    return { userId, email, role: "admin", fullName: advisor?.fc_name ?? email, advisorId: advisor?.id ?? null };
+  }
+
+  if (advisor) {
+    return { userId, email, role: "advisor", fullName: advisor.fc_name, advisorId: advisor.id };
   }
 
   // Row level security returns an empty result rather than an error when it
@@ -663,6 +656,18 @@ export const supabaseApi: PortalApi = {
 
     // Belt and braces. If a policy is ever loosened by accident, this turns a
     // silent leak of another consultant's book into a refusal to render.
+    //
+    // **This assumes the caller is a consultant, and only a consultant.** 0005
+    // gives administrators `clients_admin_select`, so an admin reading this
+    // table legitimately gets the whole firm and every row past the first
+    // consultant's looks foreign — the guard fires and the page shows "could not
+    // be loaded safely". That is not a false alarm to suppress: it is this
+    // function being called by someone it was not written for. `/clients` is
+    // gated to `advisor` in the router, which is what keeps that from happening.
+    // If an admin is ever allowed onto the consultant page, this has to learn
+    // the difference between a wide read that was granted and one that leaked,
+    // and it cannot learn that from `advisorId` — which arrives from React state
+    // and is exactly what must not be trusted here.
     const foreign = clients.filter((c) => c.advisorId !== advisorId);
     if (foreign.length > 0) {
       console.error(

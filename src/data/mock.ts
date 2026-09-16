@@ -265,11 +265,7 @@ export const drawWinners: DrawWinner[] = [
 ];
 
 export const demoViewers: Viewer[] = [
-  { userId: "usr-advisor", email: "advisor@finexis.demo", fullName: "Amy Santiago", advisorId: "adv-1", isAdmin: false },
-  { userId: "usr-advisor-2", email: "advisor2@finexis.demo", fullName: "Norm Scully", advisorId: "adv-2", isAdmin: false },
-  { userId: "usr-admin", email: "admin@finexis.demo", fullName: "Holt R.", advisorId: null, isAdmin: true },
-  // Both at once, which is the common case in a small firm: the person who
-  // loads the data also carries a book. Before capabilities replaced a single
-  // role, this account could only be one of the two.
-  { userId: "usr-both", email: "both@finexis.demo", fullName: "Madeline Wuntch", advisorId: "adv-1", isAdmin: true },
+  { userId: "usr-advisor", email: "advisor@finexis.demo", role: "advisor", fullName: "Amy Santiago", advisorId: "adv-1" },
+  { userId: "usr-advisor-2", email: "advisor2@finexis.demo", role: "advisor", fullName: "Norm Scully", advisorId: "adv-2" },
+  { userId: "usr-admin", email: "admin@finexis.demo", role: "admin", fullName: "Holt R.", advisorId: null },
 ];
