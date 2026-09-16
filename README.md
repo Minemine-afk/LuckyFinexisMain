@@ -251,6 +251,27 @@ database is free to return in any order can appear on two pages or on none. Wher
 sort is not unique — a client's name, a draw's date — the primary key is added as a tiebreak.
 That detail is easy to miss and produces duplicated or missing rows rather than an error.
 
+### When something throws
+
+React unmounts the whole tree on an unhandled render error, so without a boundary a crash is
+a blank white page — no message, no way back, and nothing to tell a consultant whether the
+problem is theirs or ours.
+
+There are two, and the placement is the point. The one inside `AppShell` wraps the page
+content only, so a crash leaves the rail, the account bar and **sign-out** working: on a
+shared machine, still being able to end the session matters more than a tidier error page.
+The one in `main.tsx` is the last resort, covering what sits outside the shell — the login
+page, the router, the auth provider.
+
+The inner boundary is keyed on the path. React does not clear a boundary's error state when
+the route changes, so without that the error follows you as you navigate and the way out is
+not a way out.
+
+What reaches the user is the error's name and message in a collapsed block — enough to paste
+into a support message — and no stack trace. The console gets everything.
+`componentDidCatch` is the one line that changes when an error tracker is wired up, and
+until then a support call is the first anyone hears about a crash.
+
 ### Freshness
 
 Pass counts get read out to clients, so the consultant's page refetches when the tab comes

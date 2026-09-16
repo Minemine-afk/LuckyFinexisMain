@@ -1,7 +1,8 @@
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import type { ReactNode } from "react";
 import { homePathFor, useAuth } from "../auth/AuthProvider";
 import { USE_MOCK } from "../data";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { MOCK_REASON } from "../lib/supabase";
 import {
   BellIcon,
@@ -31,6 +32,7 @@ const initials = (name: string): string =>
 export function AppShell({ children }: { children: ReactNode }) {
   const { viewer, signOut } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   if (!viewer) return <>{children}</>;
 
@@ -147,7 +149,14 @@ export function AppShell({ children }: { children: ReactNode }) {
               Sign out
             </button>
           </div>
-          {children}
+          {/* Inside the shell, so a page that throws leaves the rail, the
+              account bar and sign-out working — on a shared machine, still
+              being able to sign out matters more than a tidier error page.
+
+              Keyed on the path because React does not clear a boundary's error
+              state when the route changes: without this, navigating away would
+              carry the error with you and the way out would not be a way out. */}
+          <ErrorBoundary key={location.pathname}>{children}</ErrorBoundary>
         </main>
       </div>
     </>

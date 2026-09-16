@@ -1121,6 +1121,57 @@ dialog.modal.wide {
   padding: 1px 5px;
 }
 
+/* ---------------------------------------------------------------- crashed */
+
+.crashed {
+  max-width: 560px;
+}
+
+.crashed h1 {
+  font-size: 21px;
+  margin: 0 0 10px;
+}
+
+.crashed p {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.crashed-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.crashed-detail {
+  margin-top: 20px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.crashed-detail summary {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.crashed-detail code {
+  display: block;
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  /* A message can be long and has no spaces to break on. */
+  overflow-wrap: anywhere;
+}
+
 /* ---------------------------------------------------------------- account page */
 
 /* A form, not a dashboard: held to a readable width rather than stretched
