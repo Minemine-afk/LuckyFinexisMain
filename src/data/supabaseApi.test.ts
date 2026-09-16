@@ -610,12 +610,23 @@ describe("importing pass activity", () => {
         client_id: "cli-1",
         challenge_code: "attend_event",
         units: 2,
-        passes_awarded: 10,
         rate_applied: 5,
         status: "valid",
         occurred_on: "2026-09-04",
         external_ref: "Briefing",
       });
+    });
+
+    it("sends the rate and not the total, because the total is a generated column", async () => {
+      // `passes_awarded` is `units * rate_applied`, computed by Postgres, and it
+      // rejects an insert that supplies any value for it — "cannot insert a
+      // non-DEFAULT value into column". Sending the number the preview worked
+      // out fails the whole batch, so this is not a tidiness preference.
+      await commit("jake@b99.co,attend_event,2,2026-09-04,Briefing");
+
+      expect(written[0].rows[0]).not.toHaveProperty("passes_awarded");
+      // The rate still has to go, or there is nothing to generate it from.
+      expect(written[0].rows[0].rate_applied).toBe(5);
     });
 
     it("stamps date_updated, which is what the 'passes as of' line reads", async () => {

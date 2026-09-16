@@ -100,7 +100,13 @@ interface LedgerInsert {
   challenge_code: string;
   draw_id: string | null;
   units: number;
-  passes_awarded: number;
+  /**
+   * No `passes_awarded`. It is a **generated column** — Postgres computes it
+   * from `units` and `rate_applied`, and refuses an insert that supplies a
+   * value at all ("cannot insert a non-DEFAULT value into column"). Sending the
+   * number the preview worked out would fail the whole batch, so the rate is
+   * what gets written and the total is the database's to derive.
+   */
   rate_applied: number;
   status: PassStatus;
   occurred_on: string;
@@ -906,9 +912,9 @@ export const supabaseApi: PortalApi = {
         challenge_code: e.activityId,
         draw_id: drawId,
         units: e.units,
-        passes_awarded: e.passes,
-        // Stored alongside the total so a row still explains itself after the
-        // rate card changes — which is the whole reason the column exists.
+        // The rate, not the total: `passes_awarded` is generated from these two
+        // and rejects any value sent for it. Writing the rate is also what keeps
+        // a row explaining itself after the rate card changes.
         rate_applied: activity.passesPerUnit,
         status: e.status,
         occurred_on: e.earnedOn,

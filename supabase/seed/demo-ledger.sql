@@ -18,7 +18,7 @@
 
 insert into public.pass_ledger (
   campaign_id, client_id, challenge_code, draw_id,
-  units, rate_applied, passes_awarded, status,
+  units, rate_applied, status,
   occurred_on, external_ref, date_updated
 )
 select
@@ -30,8 +30,10 @@ select
   -- membership the rules can contradict. See `commitUpload` in supabaseApi.ts.
   null,
   plan.units,
+  -- The rate, not the total. `passes_awarded` is a generated column: Postgres
+  -- computes it from these two and refuses an insert that supplies a value
+  -- ("cannot insert a non-DEFAULT value into column").
   ct.passes_per_unit,
-  plan.units * ct.passes_per_unit,
   'confirmed',
   plan.occurred_on,
   'SEED-' || plan.reference || '-' || roster.n,
